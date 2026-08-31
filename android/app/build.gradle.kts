@@ -14,6 +14,9 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // 1. Enable Desugaring for flutter_local_notifications
+        isCoreLibraryDesugaringEnabled = true
+
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -31,6 +34,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 2. Enable MultiDex
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -38,7 +44,7 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
-              // ✅ Disable minification and shrinking in Kotlin DSL
+            // ✅ Disable minification and shrinking in Kotlin DSL
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -47,4 +53,9 @@ android {
 
 flutter {
     source = "../.."
+}
+
+// 3. Add Desugaring Library Dependency
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

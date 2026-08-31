@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../login_screen.dart';
-import 'package:lottie/lottie.dart';
+// import 'package:lottie/lottie.dart';
 
 class OnboardPage3 extends StatelessWidget {
   const OnboardPage3({super.key});
@@ -94,14 +94,14 @@ class OnboardPage3 extends StatelessWidget {
             const Spacer(),
 
             /// ---------- LOTTIE ANIMATION ----------
-            SizedBox(
-              height: screenHeight * 0.28,
-              width: screenWidth * 0.8,
-              child: Lottie.asset(
-                "assets/images/burger_anim.json",
-                fit: BoxFit.contain,
-              ),
-            ),
+            // SizedBox(
+            //   height: screenHeight * 0.28,
+            //   width: screenWidth * 0.8,
+            //   child: Lottie.asset(
+            //     "assets/images/burger_anim.json",
+            //     fit: BoxFit.contain,
+            //   ),
+            // ),
 
             const SizedBox(height: 20),
           ],
