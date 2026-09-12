@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'login_screen.dart';
 import 'main_navigation.dart';
-import 'rider/RiderHomeScreen.dart';
 import 'fcm_service.dart'; // 👈 ADDED
 
 class SignUpScreen extends StatefulWidget {
@@ -39,14 +37,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
     'admin': 'R003',
   };
 
+  // Only @gmail.com addresses are accepted for sign up.
   static final RegExp _emailRegex = RegExp(
-    r'^[a-zA-Z0-9.!#$%&*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$',
+    r'^[a-zA-Z0-9.!#$%&*+/=?^_`{|}~-]+@gmail\.com$',
   );
 
   String? _validateEmail(String? value) {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return 'Enter your email';
-    if (!_emailRegex.hasMatch(v)) return 'Enter a valid email address';
+    if (!_emailRegex.hasMatch(v)) return 'Only @gmail.com addresses are allowed';
     return null;
   }
 
@@ -189,68 +188,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  String? _pendingGuestUidForGoogle;
-
-  Future<UserCredential?> signUpWithGoogle() async {
-    try {
-      final GoogleSignIn googleSignIn = GoogleSignIn(
-        serverClientId:
-            '848662087857-4ht9ticbmr7p6fpmju63spi06lnn652n.apps.googleusercontent.com',
-      );
-
-      try {
-        await googleSignIn.signOut();
-      } catch (_) {}
-
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-      if (googleUser == null) return null;
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final userCredential = await FirebaseAuth.instance.signInWithCredential(
-        credential,
-      );
-
-      final user = userCredential.user;
-      if (user != null) {
-        if (_pendingGuestUidForGoogle != null) {
-          await _migrateGuestCart(_pendingGuestUidForGoogle!, user.uid);
-          _pendingGuestUidForGoogle = null;
-        }
-
-        final userDoc = FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid);
-        final snapshot = await userDoc.get();
-
-        if (!snapshot.exists) {
-          await userDoc.set({
-            'name': user.displayName ?? 'User',
-            'email': user.email,
-            'photoUrl': user.photoURL,
-            'roleID': roleMap[widget.role],
-          });
-        }
-
-        // 👈 ADDED
-        await FcmService.syncDeviceToken(user.uid);
-      }
-
-      return userCredential;
-    } catch (e) {
-      if (mounted) {
-        _showSnack("Google Sign-Up failed: $e");
-      }
-      return null;
-    }
-  }
-
   @override
   void dispose() {
     _nameController.dispose();
@@ -359,58 +296,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
                                   ),
                                 ),
                         ),
-                      ),
-
-                      const SizedBox(height: 24),
-                      _buildDivider(),
-                      const SizedBox(height: 20),
-
-                      _buildGoogleButton(
-                        label: "Sign up with Google",
-                        onTap: _isLoading
-                            ? () {}
-                            : () async {
-                                setState(() => _isLoading = true);
-
-                                final prevUser =
-                                    FirebaseAuth.instance.currentUser;
-                                _pendingGuestUidForGoogle =
-                                    (prevUser != null && prevUser.isAnonymous)
-                                        ? prevUser.uid
-                                        : null;
-
-                                final userCredential = await signUpWithGoogle();
-                                setState(() => _isLoading = false);
-
-                                if (userCredential != null) {
-                                  final uid = userCredential.user!.uid;
-                                  final userDoc = await FirebaseFirestore
-                                      .instance
-                                      .collection('users')
-                                      .doc(uid)
-                                      .get();
-                                  final roleID = userDoc['roleID'];
-
-                                  if (!mounted) return;
-
-                                  if (roleID == 'R001') {
-                                    Navigator.pushReplacement(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => const MainScreen(),
-                                      ),
-                                    );
-                                  } else if (roleID == 'R002') {
-                                    Navigator.pushReplacement(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) =>
-                                            RiderHomeScreen(riderId: uid),
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
                       ),
 
                       const SizedBox(height: 28),
@@ -586,54 +471,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     );
   }
 
-  Widget _buildDivider() {
-    return Row(
-      children: [
-        Expanded(child: Divider(color: Colors.black.withOpacity(0.15))),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12),
-          child: Text(
-            "or",
-            style: TextStyle(color: Colors.black45, fontSize: 12),
-          ),
-        ),
-        Expanded(child: Divider(color: Colors.black.withOpacity(0.15))),
-      ],
-    );
-  }
-
-  Widget _buildGoogleButton({
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return SizedBox(
-      width: double.infinity,
-      height: 52,
-      child: OutlinedButton.icon(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: fieldColor,
-          side: const BorderSide(color: Colors.black26),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
-          ),
-        ),
-        icon: const Icon(
-          Icons.g_mobiledata_rounded,
-          color: themeColor,
-          size: 26,
-        ),
-        label: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.black87,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _WaveClipper extends CustomClipper<Path> {

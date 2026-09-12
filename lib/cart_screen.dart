@@ -2,8 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../logic/price_u.dart';
-import 'checkout_location.dart';
+import 'price_u.dart';
+import 'checkout.dart';
 import 'cart_provider.dart';
 import 'login_screen.dart';
 

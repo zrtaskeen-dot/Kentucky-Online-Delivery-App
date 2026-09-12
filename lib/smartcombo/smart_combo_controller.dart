@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../repository/smart_combo_dal.dart';
+import 'smart_combo_dal.dart';
 import '../models/food_item.dart';
 
 class SmartComboController {

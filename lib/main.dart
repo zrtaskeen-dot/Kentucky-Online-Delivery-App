@@ -4,16 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'cart_provider.dart';
-import 'logic/notification_service.dart';
-import '/auth_wrapper.dart';
+import 'notification_service.dart';
+import 'splash_screen.dart';
 import 'global_feedback_listener.dart';
-import 'logic/rider_logic.dart';
+import 'rider/rider_logic.dart';
 
 // Screens for Deep Linking Navigation
 import 'live_tracking.dart';
 import 'order_history.dart';
 // Import your Rider assigned orders screen here, e.g.:
 // import 'rider_assigned_orders_screen.dart';
+// Import your Menu Item / Deal detail screen here, e.g.:
+// import 'menu_item_detail_screen.dart';
 
 // Global Key for programmatic navigation upon notification tap
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -98,6 +100,18 @@ class _MyAppState extends State<MyApp> {
           builder: (_) => const OrderHistoryScreen(),
         ),
       );
+    } else if (data['type'] == 'new_menu_item') {
+      // Naya deal/item/combo notification tap hone par uski detail
+      // screen par navigate karo. "menuItemId" Cloud Function
+      // (notifyCustomersOnNewMenuItem) se data payload mein aata hai.
+      final String? menuItemId = data['menuItemId'];
+      if (menuItemId != null) {
+        // navigatorKey.currentState?.push(
+        //   MaterialPageRoute(
+        //     builder: (_) => MenuItemDetailScreen(menuItemId: menuItemId),
+        //   ),
+        // );
+      }
     }
   }
 
@@ -112,7 +126,7 @@ class _MyAppState extends State<MyApp> {
         navigatorKey: navigatorKey, // Attached global key for navigation
         debugShowCheckedModeBanner: false,
         home: const GlobalFeedbackListener(
-          child: AuthWrapper(),
+          child: SplashScreen(),
         ),
       ),
     );

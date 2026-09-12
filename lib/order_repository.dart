@@ -1,13 +1,6 @@
-// ── DATA LAYER (Repository) ──────────────────────────────────
-// All direct Firestore access lives here. The presentation layer
-// (screens) never touches FirebaseFirestore/FirebaseAuth directly —
-// it calls methods on OrderRepository instead. This is what makes it
-// possible to later swap Firestore for another backend, or mock this
-// repository in tests, without touching any UI code.
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../logic/price_u.dart';
+import 'price_u.dart'; // 👈 Fix: Price helper imported
 
 class OrderRepository {
   OrderRepository({FirebaseFirestore? firestore})
@@ -29,17 +22,10 @@ class OrderRepository {
 
   String get _currentUserId => FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  /// Live stream of the current user's orders (all statuses).
-  /// Sorting into active/past and by recency is a presentation concern
-  /// and stays in the screen — this just returns the raw stream.
   Stream<QuerySnapshot<Map<String, dynamic>>> streamMyOrders() {
     return _ordersRef.where('customerId', isEqualTo: _currentUserId).snapshots();
   }
 
-  /// Re-adds a past order's items to the user's cart, merging
-  /// quantities with any existing cart line for the same item name.
-  /// Price always comes from [readItemPrice] (domain layer) so a
-  /// differently-named or nested price field never silently becomes 0.
   Future<void> reorderItems(List<Map<String, dynamic>> items) async {
     final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 

@@ -8,7 +8,7 @@
 <application
         android:label="Kentucky"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/launcher_icon">
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyDjvktH0VYqjJuF-0HMZ-1n01Gmfp8ckUA"/>

@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:latlong2/latlong.dart' as latlong;
 import 'cart_provider.dart';
-import 'delivery_screen.dart';
+import 'delivery_type.dart';
 
 class CheckoutLocationScreen extends StatefulWidget {
   final double totalAmount;
@@ -91,6 +91,9 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
   void initState() {
     super.initState();
     _loadSavedInfo();
+    // Auto-detect the customer's real location on open instead of leaving
+    // the pin on the Islamabad fallback until they manually tap GPS.
+    _handleGpsSelection(isAutoDetect: true);
   }
 
   Future<void> _loadSavedInfo() async {
@@ -246,34 +249,61 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
     });
   }
 
+  // Uses the newer Places Autocomplete API so the search is restricted to
+  // an exact rectangle (the Cantt zone) instead of the legacy API's
+  // circular strictbounds, which could still let outside-zone places in.
   Future<void> _fetchPredictions(String input) async {
     setState(() => _isSearching = true);
 
     try {
-      final centerLat = (_zoneSouthWest.latitude + _zoneNorthEast.latitude) / 2;
-      final centerLng =
-          (_zoneSouthWest.longitude + _zoneNorthEast.longitude) / 2;
-
       final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/place/autocomplete/json'
-        '?input=${Uri.encodeComponent(input)}'
-        '&location=$centerLat,$centerLng'
-        '&radius=15000'
-        '&components=country:pk'
-        '&key=$_placesApiKey',
+        'https://places.googleapis.com/v1/places:autocomplete',
       );
 
-      final res = await http.get(url);
+      final res = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': _placesApiKey,
+        },
+        body: jsonEncode({
+          'input': input,
+          'includedRegionCodes': ['pk'],
+          'locationRestriction': {
+            'rectangle': {
+              'low': {
+                'latitude': _zoneSouthWest.latitude,
+                'longitude': _zoneSouthWest.longitude,
+              },
+              'high': {
+                'latitude': _zoneNorthEast.latitude,
+                'longitude': _zoneNorthEast.longitude,
+              },
+            },
+          },
+        }),
+      );
+
       final data = jsonDecode(res.body);
 
-      if (data['status'] == 'OK') {
-        final results = (data['predictions'] as List)
-            .map<Map<String, String>>(
-              (p) => {
-                'description': p['description'] as String,
-                'place_id': p['place_id'] as String,
-              },
-            )
+      // TEMP DEBUG — remove once search is working. Prints the raw
+      // response so we can see exactly what Google is rejecting.
+      debugPrint('Autocomplete status: ${res.statusCode}');
+      debugPrint('Autocomplete body: ${res.body}');
+
+      if (res.statusCode == 200 && data['suggestions'] != null) {
+        final results = (data['suggestions'] as List)
+            .map<Map<String, String>?>((s) {
+              final prediction = s['placePrediction'];
+              if (prediction == null) return null;
+              return {
+                'description': (prediction['text']?['text'] ?? '') as String,
+                'place_id': (prediction['placeId'] ?? '') as String,
+              };
+            })
+            .whereType<Map<String, String>>()
+            .where((p) => p['place_id']!.isNotEmpty)
+            .where((p) => _mentionsWah(p['description']!))
             .toList();
 
         setState(() {
@@ -292,6 +322,14 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
         _isSearching = false;
       });
     }
+  }
+
+  // Belt-and-suspenders filter on top of locationRestriction — some
+  // well-known place names can still slip past the rectangle bound, so
+  // this drops any prediction whose text doesn't actually mention Wah.
+  // Uses a word boundary so it won't false-match things like "Wahdat".
+  bool _mentionsWah(String description) {
+    return RegExp(r'\bwah\b', caseSensitive: false).hasMatch(description);
   }
 
   Future<void> _selectPrediction(Map<String, String> prediction) async {
@@ -345,7 +383,7 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
     }
   }
 
-  Future<void> _handleGpsSelection() async {
+  Future<void> _handleGpsSelection({bool isAutoDetect = false}) async {
     setState(() => _gpsLoading = true);
 
     try {
@@ -353,14 +391,33 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
       if (perm == LocationPermission.denied) {
         perm = await Geolocator.requestPermission();
       }
-      if (perm == LocationPermission.deniedForever) {
-        _snack('Location permission denied. Please allow it from settings.');
+      if (perm == LocationPermission.deniedForever ||
+          perm == LocationPermission.denied) {
+        // On the silent auto-detect we just fall back to the default pin
+        // instead of interrupting the user with a snackbar right away.
+        if (!isAutoDetect) {
+          _snack('Location permission denied. Please allow it from settings.');
+        }
         setState(() => _gpsLoading = false);
         return;
       }
 
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!isAutoDetect) {
+          _snack('Please enable GPS/location services.');
+        }
+        setState(() => _gpsLoading = false);
+        return;
+      }
+
+      // 👈 FIX: 'high' can still return a fix that's 50-100m off,
+      // especially indoors/inside large buildings like a college campus
+      // (GPS signals bounce off walls, sometimes landing on the nearest
+      // road instead of the actual building). 'best' asks the device to
+      // try harder for precision before returning a result.
       final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy: LocationAccuracy.best,
       );
 
       final newLatLng = LatLng(pos.latitude, pos.longitude);
@@ -373,12 +430,26 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
 
       _checkZone();
 
+      // 👈 NEW: pos.accuracy is the GPS fix's margin of error in meters.
+      // When it's poor (common indoors/inside campuses), nudge the
+      // customer to check the pin themselves — it's already draggable
+      // and tappable, they just need a reason to double-check it instead
+      // of trusting a GPS fix that silently landed on the wrong building.
+      if (pos.accuracy > 30) {
+        _snack(
+          'GPS signal is weak here — please check the pin is on the '
+          'right spot and drag it if needed.',
+        );
+      }
+
       _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(newLatLng, 16.0),
+        CameraUpdate.newLatLngZoom(newLatLng, 17.0),
       );
     } catch (_) {
       setState(() => _gpsLoading = false);
-      _snack('Failed to get GPS location.');
+      if (!isAutoDetect) {
+        _snack('Failed to get GPS location.');
+      }
     }
   }
 
@@ -486,7 +557,15 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
               target: _pinLatLng,
               zoom: 15.0,
             ),
-            onMapCreated: (controller) => _mapController = controller,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              // In case GPS already resolved before the map finished
+              // loading, make sure the camera reflects the current pin
+              // instead of staying on the initial default.
+              controller.animateCamera(
+                CameraUpdate.newLatLngZoom(_pinLatLng, 15.0),
+              );
+            },
             onTap: _onMapTapped,
             markers: {
               Marker(
@@ -737,8 +816,7 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
           keyboardType: TextInputType.phone,
           maxLength: 11,
         ),
-
-        const SizedBox(height: 4),
+        const SizedBox(height: 8),
 
         InkWell(
           onTap: () =>

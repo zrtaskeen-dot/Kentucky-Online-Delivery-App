@@ -7,6 +7,7 @@ class FoodItem {
   final String description;
   final String imageUrl;
   final Map<String, dynamic> prices;
+  final DateTime? createdAt;
 
   FoodItem({
     required this.id,
@@ -15,10 +16,19 @@ class FoodItem {
     required this.description,
     required this.imageUrl,
     required this.prices,
+    this.createdAt,
   });
 
   factory FoodItem.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+
+    final rawCreatedAt = data['createdAt'];
+    DateTime? parsedCreatedAt;
+    if (rawCreatedAt is Timestamp) {
+      parsedCreatedAt = rawCreatedAt.toDate();
+    } else if (rawCreatedAt is int) {
+      parsedCreatedAt = DateTime.fromMillisecondsSinceEpoch(rawCreatedAt);
+    }
 
     return FoodItem(
       id: doc.id,
@@ -27,6 +37,7 @@ class FoodItem {
       description: data['description'] ?? '',
       imageUrl: data['imageUrl'] ?? '',
       prices: Map<String, dynamic>.from(data['prices'] ?? {}),
+      createdAt: parsedCreatedAt,
     );
   }
 }

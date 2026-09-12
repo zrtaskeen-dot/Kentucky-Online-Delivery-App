@@ -1,10 +1,9 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import '../notification_service.dart';
 
 class RiderController extends ChangeNotifier {
   bool _isLoading = false;
@@ -15,13 +14,46 @@ class RiderController extends ChangeNotifier {
 
   StreamSubscription<Position>? _positionStreamSubscription;
 
-  // ⚠️ IP ADDRESS CONFIGURATION:
-  // - Real Device / Wi-Fi: Use your laptop's IPv4 address (e.g., http://192.168.1.7:3000)
-  // - Android Emulator: http://10.0.2.2:3000
-  // 👈 FIX: this was previously named "baseUrl" (with the "/send-notification"
-  // path already attached) but the code below referenced "_backendBaseUrl",
-  // which didn't exist — that mismatch caused the notification call to fail.
-  final String _backendBaseUrl = 'http://192.168.1.36:3000';
+  // Builds a friendly in-app notification for the customer based on the
+  // new order status. For 'Accepted' it looks up the rider's name so the
+  // message can say who accepted the order.
+  Future<void> _notifyCustomerOfStatus({
+    required String customerId,
+    required String status,
+    String? riderId,
+  }) async {
+    if (customerId.isEmpty) return;
+
+    String body;
+    switch (status) {
+      case 'Accepted':
+        String riderName = 'A rider';
+        if (riderId != null && riderId.isNotEmpty) {
+          final riderDoc =
+              await FirebaseFirestore.instance.collection('users').doc(riderId).get();
+          riderName = riderDoc.data()?['name'] ?? riderName;
+        }
+        body = '$riderName has accepted your order and will pick it up soon.';
+        break;
+      case 'Picked Up':
+        body = 'Your order has been picked up and is on its way.';
+        break;
+      case 'On the Way':
+        body = 'Your rider is on the way to you 🛵';
+        break;
+      case 'Delivered':
+        body = 'Your order has been delivered. Enjoy your meal!';
+        break;
+      default:
+        body = 'Your order status is now: $status';
+    }
+
+    await NotificationService.notifyCustomer(
+      customerId: customerId,
+      title: 'Order Status Update',
+      body: body,
+    );
+  }
 
   void _setLoading(bool value) {
     _isLoading = value;
@@ -66,6 +98,10 @@ class RiderController extends ChangeNotifier {
   }
 
   // 4. Accept Order Method
+  // No restriction here — a rider can accept as many orders as they want
+  // (they just sit in "Accepted" state). The one-active-delivery rule is
+  // enforced separately in updateOrderStatus() when a rider tries to
+  // actually START a delivery (transition to "Picked Up").
   Future<bool> acceptOrder(
     String orderId,
     String riderId,
@@ -84,13 +120,13 @@ class RiderController extends ChangeNotifier {
             'acceptedAt': FieldValue.serverTimestamp(),
           });
 
-      // Send FCM notification to Customer
-      if (customerId.isNotEmpty) {
-        await notifyCustomerForStatus(customerId, 'Accepted');
-      }
+      // In-app notification to the customer, with the rider's name.
+      await _notifyCustomerOfStatus(
+        customerId: customerId,
+        status: 'Accepted',
+        riderId: riderId,
+      );
 
-      // Start real-time GPS tracking
-      startLiveLocationTracking(orderId);
       _setLoading(false);
       return true;
     } catch (e) {
@@ -101,55 +137,75 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  // 5. Send Push Notification via Node.js Backend
-  Future<void> notifyCustomerForStatus(String customerId, String status) async {
+  // 4b. Update Order Status (Picked Up / On the Way / Delivered / etc.)
+  // Writes the new status to Firestore, then sends the customer an in-app
+  // notification (no Cloud Functions / backend server involved — it's
+  // just a document written to the `notifications` collection, which
+  // NotificationScreen listens to live).
+  //
+  // One-active-delivery rule: a rider can have many orders sitting in
+  // "Accepted", but can only be actually OUT delivering one at a time.
+  // So the check happens specifically on the transition into "Picked Up"
+  // — that's the moment a delivery actually "starts". Once an order is
+  // already Picked Up, moving it on to "On the Way" / "Delivered" never
+  // hits this check (it's the same delivery continuing).
+  Future<bool> updateOrderStatus(String orderId, String newStatus) async {
+    _setLoading(true);
+    _setError('');
     try {
-      debugPrint('Fetching FCM token for Customer ID: $customerId');
+      final orderRef = FirebaseFirestore.instance.collection('orders').doc(orderId);
 
-      // Fetch Customer user doc from Firestore
-      DocumentSnapshot userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(customerId)
-          .get();
+      // Read first so we know the riderId/customerId before writing.
+      final orderSnap = await orderRef.get();
+      final orderData = orderSnap.data();
+      final riderId = (orderData?['riderId'] ?? '').toString();
+      final customerId =
+          (orderData?['customerId'] ?? orderData?['userId'] ?? '').toString();
 
-      if (!userDoc.exists) {
-        debugPrint('Customer user document does not exist!');
-        return;
+      if (newStatus == 'Picked Up' && riderId.isNotEmpty) {
+        final activeSnap = await FirebaseFirestore.instance
+            .collection('orders')
+            .where('riderId', isEqualTo: riderId)
+            .where('order_status', whereIn: ['Picked Up', 'On the Way'])
+            .get();
+        final hasOtherActiveDelivery =
+            activeSnap.docs.any((d) => d.id != orderId);
+
+        if (hasOtherActiveDelivery) {
+          _setError(
+            'You already have a delivery in progress. Please complete it before starting another.',
+          );
+          _setLoading(false);
+          return false;
+        }
       }
 
-      final userData = userDoc.data() as Map<String, dynamic>?;
-      String? customerToken = userData?['fcmToken'];
+      await orderRef.update({
+        'order_status': newStatus,
+        'statusUpdatedAt': FieldValue.serverTimestamp(),
+      });
 
-      if (customerToken == null || customerToken.isEmpty) {
-        debugPrint('Customer fcmToken is missing or empty in Firestore!');
-        return;
+      await _notifyCustomerOfStatus(customerId: customerId, status: newStatus);
+
+      if (newStatus == 'Picked Up') {
+        // Delivery has actually started now — begin GPS tracking.
+        startLiveLocationTracking(orderId);
+      } else if (newStatus == 'Delivered') {
+        stopLiveLocationTracking();
       }
 
-      debugPrint('Sending notification request to backend...');
-
-      final response = await http.post(
-        Uri.parse('$_backendBaseUrl/send-notification'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'fcmToken': customerToken,
-          'title': 'Order Status Update 🛵',
-          'body': 'Your order status is now: $status',
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        debugPrint('FCM Notification Sent: ${response.body}');
-      } else {
-        debugPrint(
-          'Backend API Error [${response.statusCode}]: ${response.body}',
-        );
-      }
+      debugPrint('Order $orderId status updated to: $newStatus');
+      _setLoading(false);
+      return true;
     } catch (e) {
-      debugPrint('Exception sending notification request: $e');
+      _setError(e.toString());
+      debugPrint('Error updating order status: $e');
+      _setLoading(false);
+      return false;
     }
   }
 
-  // 6. Launch Maps Navigation for Customer Address
+  // 5. Launch Maps Navigation for Customer Address
   Future<void> launchCustomerNavigation({
     required double? lat,
     required double? lng,
@@ -182,7 +238,7 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  // 7. Live GPS Location Tracking
+  // 6. Live GPS Location Tracking
   void startLiveLocationTracking(String orderId) async {
     bool serviceEnabled;
     LocationPermission permission;
@@ -230,7 +286,7 @@ class RiderController extends ChangeNotifier {
         });
   }
 
-  // 8. Stop Live Location Tracking
+  // 7. Stop Live Location Tracking
   void stopLiveLocationTracking() {
     _positionStreamSubscription?.cancel();
     _positionStreamSubscription = null;

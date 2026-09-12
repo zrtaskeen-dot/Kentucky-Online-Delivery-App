@@ -43,6 +43,68 @@ class _MainScreenState extends State<MainScreen> {
     return Icon(icon, color: const Color(0xFFA62600), size: 27);
   }
 
+  // Notification icon (selected or not) with an unread-count badge.
+  // Counts BOTH this user's own notifications and store-wide 'ALL'
+  // broadcasts — matching the same query NotificationScreen uses, so the
+  // badge number always matches what the user sees when they open it.
+  Widget _notificationIconWithBadge({
+    required bool selected,
+    required String? currentUserId,
+  }) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: currentUserId == null
+          ? null
+          : FirebaseFirestore.instance
+                .collection('notifications')
+                .where('userId', whereIn: [currentUserId, 'ALL'])
+                .where('isRead', isEqualTo: false)
+                .snapshots(),
+
+      builder: (context, snapshot) {
+        int unreadCount = 0;
+
+        if (snapshot.hasData) {
+          unreadCount = snapshot.data!.docs.length;
+        }
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            selected
+                ? selectedIcon(Icons.notifications)
+                : unselectedIcon(Icons.notifications),
+
+            if (unreadCount > 0)
+              Positioned(
+                right: selected ? -2 : -5,
+                top: selected ? -2 : -5,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: const BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                  ),
+                  constraints: const BoxConstraints(
+                    minWidth: 15,
+                    minHeight: 15,
+                  ),
+                  child: Text(
+                    unreadCount > 9 ? '9+' : '$unreadCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -115,108 +177,14 @@ class _MainScreenState extends State<MainScreen> {
 
                 // 3. NOTIFICATIONS
                 BottomNavigationBarItem(
-                  icon: StreamBuilder<QuerySnapshot>(
-                    stream: currentUser == null
-                        ? null
-                        : FirebaseFirestore.instance
-                              .collection('notifications')
-                              .where('userId', isEqualTo: currentUser.uid)
-                              .where('isRead', isEqualTo: false)
-                              .snapshots(),
-
-                    builder: (context, snapshot) {
-                      int unreadCount = 0;
-
-                      if (snapshot.hasData) {
-                        unreadCount = snapshot.data!.docs.length;
-                      }
-
-                      return Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          unselectedIcon(Icons.notifications),
-
-                          if (unreadCount > 0)
-                            Positioned(
-                              right: -5,
-                              top: -5,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
-                                ),
-                                constraints: const BoxConstraints(
-                                  minWidth: 15,
-                                  minHeight: 15,
-                                ),
-                                child: Text(
-                                  unreadCount > 9 ? '9+' : '$unreadCount',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                        ],
-                      );
-                    },
+                  icon: _notificationIconWithBadge(
+                    selected: false,
+                    currentUserId: currentUser?.uid,
                   ),
-
-                  activeIcon: StreamBuilder<QuerySnapshot>(
-                    stream: currentUser == null
-                        ? null
-                        : FirebaseFirestore.instance
-                              .collection('notifications')
-                              .where('userId', isEqualTo: currentUser.uid)
-                              .where('isRead', isEqualTo: false)
-                              .snapshots(),
-
-                    builder: (context, snapshot) {
-                      int unreadCount = 0;
-
-                      if (snapshot.hasData) {
-                        unreadCount = snapshot.data!.docs.length;
-                      }
-
-                      return Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          selectedIcon(Icons.notifications),
-
-                          if (unreadCount > 0)
-                            Positioned(
-                              right: -2,
-                              top: -2,
-                              child: Container(
-                                padding: const EdgeInsets.all(3),
-                                decoration: const BoxDecoration(
-                                  color: Colors.red,
-                                  shape: BoxShape.circle,
-                                ),
-                                constraints: const BoxConstraints(
-                                  minWidth: 15,
-                                  minHeight: 15,
-                                ),
-                                child: Text(
-                                  unreadCount > 9 ? '9+' : '$unreadCount',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ),
-                        ],
-                      );
-                    },
+                  activeIcon: _notificationIconWithBadge(
+                    selected: true,
+                    currentUserId: currentUser?.uid,
                   ),
-
                   label: 'Alerts',
                 ),
 

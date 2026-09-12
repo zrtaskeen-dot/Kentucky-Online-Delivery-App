@@ -21,7 +21,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     if (phone == null || phone.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Rider number available nahi hai'),
+          content: Text('Rider phone number is not available'),
           backgroundColor: primary,
         ),
       );
@@ -34,14 +34,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     if (!launched && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Call open nahi ho saka'),
+          content: Text('Could not open the phone dialer'),
           backgroundColor: primary,
         ),
       );
     }
   }
 
-  // 🧭 Dono Pins ko Screen mein auto-fit karne ka logic
   void _fitTwoPinsOnScreen(LatLng riderLatLng, LatLng destLatLng) {
     if (_mapController == null) return;
 
@@ -64,7 +63,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     );
 
     _mapController!.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 80), // 80px padding for clear view
+      CameraUpdate.newLatLngBounds(bounds, 80),
     );
   }
 
@@ -104,14 +103,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           final data = snapshot.data!.data() as Map<String, dynamic>;
           final status = data['order_status'] ?? 'Accepted';
 
-          // Firestore Coordinates Parsing
           final double? riderLat = (data['riderLat'] as num?)?.toDouble();
           final double? riderLng = (data['riderLng'] as num?)?.toDouble();
           final double? destLat = (data['latitude'] as num?)?.toDouble();
           final double? destLng = (data['longitude'] as num?)?.toDouble();
 
           final String riderName = data['riderName'] ?? 'Rider';
-          // Rider Phone fallback (riderPhone or phone_number)
           final String? riderPhone =
               (data['riderPhone'] ?? data['phone_number']) as String?;
 
@@ -129,7 +126,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           final riderLatLng = LatLng(riderLat, riderLng);
           final destLatLng = hasDestination ? LatLng(destLat, destLng) : null;
 
-          // Camera Bounds Update Frame ke baad
           if (destLatLng != null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _fitTwoPinsOnScreen(riderLatLng, destLatLng);
@@ -140,7 +136,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             children: [
               Expanded(
                 child: GoogleMap(
-                  // Center between coordinates on load with wider zoom (10)
                   initialCameraPosition: CameraPosition(
                     target: LatLng(
                       (riderLat + (destLat ?? riderLat)) / 2,
@@ -157,7 +152,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   myLocationButtonEnabled: false,
                   zoomControlsEnabled: true,
                   markers: {
-                    // 1. Rider Marker (Orange)
                     Marker(
                       markerId: const MarkerId('rider'),
                       position: riderLatLng,
@@ -166,8 +160,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       ),
                       infoWindow: InfoWindow(title: 'Rider: $riderName'),
                     ),
-
-                    // 2. Customer Destination Marker (Red)
                     if (destLatLng != null)
                       Marker(
                         markerId: const MarkerId('destination'),
@@ -181,7 +173,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                 ),
               ),
 
-              // Rider Details Bottom Card
               Container(
                 padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                 decoration: const BoxDecoration(
@@ -283,7 +274,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             const CircularProgressIndicator(color: primary),
             const SizedBox(height: 24),
             Text(
-              '$riderName ne abhi apni location enable nahi ki',
+              '$riderName has not enabled location yet',
               textAlign: TextAlign.center,
               style: const TextStyle(
                 fontSize: 16,
@@ -293,7 +284,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Rider ke GPS on karte hi live tracking yahan\nautomatically shuru ho jayegi.',
+              'Live tracking will start here automatically\nonce the rider turns on GPS.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
@@ -333,7 +324,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              '$riderName ne aapka order successfully deliver kar diya hai.',
+              '$riderName has successfully delivered your order.',
               textAlign: TextAlign.center,
               style: const TextStyle(fontSize: 14, color: Colors.grey),
             ),
@@ -370,7 +361,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     switch (status) {
       case 'Picked Up':
         return Colors.blue.shade700;
-      case 'On the Way':
+      case 'On The Way':
         return Colors.orange.shade700;
       case 'Delivered':
         return Colors.green.shade700;

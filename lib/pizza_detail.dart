@@ -94,7 +94,12 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     return total;
   }
 
-  int get totalPrice => (basePrice + toppingsPrice) * quantity;
+  // Base unit price for one item (size + toppings, quantity NOT applied).
+  // This is what gets stored in Firestore's 'price' field, so the cart's
+  // quantity stepper doesn't multiply an already-multiplied price.
+  int get unitPrice => basePrice + toppingsPrice;
+
+  int get totalPrice => unitPrice * quantity;
 
   // ─────────────────────────────────────────────────────────────
   @override
@@ -142,18 +147,18 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   Future<void> _addToCart() async {
     setState(() => isAddingToCart = true);
     try {
-      final int price = totalPrice;
+      final int price = unitPrice;
 
       debugPrint(
         'Adding to cart -> name: ${widget.item.name}, '
         'size: $selectedSize, basePrice: $basePrice, '
-        'toppingsPrice: $toppingsPrice, totalPrice: $price, '
+        'toppingsPrice: $toppingsPrice, unitPrice: $price, '
         'userId: $userId, branchId: ${widget.selectedBranchId}',
       );
 
       if (price <= 0) {
         debugPrint(
-          'Warning: totalPrice is 0. Check that "${widget.item.name}" '
+          'Warning: unitPrice is 0. Check that "${widget.item.name}" '
           'has a valid "prices" Map field in Firestore with a matching '
           'key for size "$selectedSize".',
         );

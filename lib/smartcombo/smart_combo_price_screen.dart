@@ -231,10 +231,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                             return numA.compareTo(numB);
                           });
 
-                          // 👈 CHANGED: shrinkWrap + NeverScrollableScrollPhysics
-                          // taake ye ListView apni content ki height le,
-                          // scrolling ka kaam outer SingleChildScrollView
-                          // karega.
+                          
                           return ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),

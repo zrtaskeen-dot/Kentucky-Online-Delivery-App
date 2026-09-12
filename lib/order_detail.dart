@@ -13,6 +13,7 @@ class OrderDetailsScreen extends StatelessWidget {
   final LatLng deliveryLocation;
   final String deliveryTime;
   final String paymentMethod;
+  final bool receiptUploaded;
 
   const OrderDetailsScreen({
     super.key,
@@ -25,6 +26,7 @@ class OrderDetailsScreen extends StatelessWidget {
     required this.deliveryLocation,
     required this.deliveryTime,
     required this.paymentMethod,
+    this.receiptUploaded = false,
   });
 
   static const Color themeColor = Color(0xFFA62600);
@@ -32,10 +34,29 @@ class OrderDetailsScreen extends StatelessWidget {
   static const Color cardColor = Color(0xFFFFFFF0);
   static const Color lightMaroon = Color(0xFFFFF3F1);
 
+  // Delivery screen sets deliveryTime to "Standard Delivery" for
+  // immediate orders, and a formatted date/time string for scheduled
+  // ("Deliver Later") orders — so this is not "Standard Delivery" only
+  // when the order is scheduled.
+  bool get _isScheduled => deliveryTime != "Standard Delivery";
+
+  // Delivery screen sets paymentMethod to "Cash On Delivery" for COD,
+  // and the provider name (EasyPaisa/JazzCash) for online payments.
+  bool get _isOnlinePayment => paymentMethod != "Cash On Delivery";
+
+  // Only "Deliver Later" + Online, with no receipt uploaded yet, is
+  // pending. If the receipt WAS already uploaded at checkout (e.g. the
+  // scheduled time was within the immediate-upload window), the order
+  // shows as placed successfully right away, same as any other order.
+  bool get _isPendingReceiptUpload =>
+      _isScheduled && _isOnlinePayment && !receiptUploaded;
+
   void goBackToMenu(BuildContext context) {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (context) => const MainScreen()), // 👈 CHANGED: HomeScreen -> MainScreen, taake bottom nav bar wapas aaye
+      MaterialPageRoute(
+        builder: (context) => const MainScreen(),
+      ), // 👈 CHANGED: HomeScreen -> MainScreen, taake bottom nav bar wapas aaye
       (Route<dynamic> route) => false,
     );
   }
@@ -110,20 +131,28 @@ class OrderDetailsScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: themeColor.withOpacity(0.1),
+                  color: (_isPendingReceiptUpload ? Colors.orange : themeColor)
+                      .withOpacity(0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.check_circle_rounded,
-                  color: themeColor,
+                child: Icon(
+                  _isPendingReceiptUpload
+                      ? Icons.hourglass_top_rounded
+                      : Icons.check_circle_rounded,
+                  color: _isPendingReceiptUpload
+                      ? Colors.orange.shade800
+                      : themeColor,
                   size: 26,
                 ),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text(
-                  "Order Placed Successfully!",
-                  style: TextStyle(
+                  _isPendingReceiptUpload
+                      ? "Order will be confirmed once you upload the "
+                            "receipt two hours before delivery."
+                      : "Order Placed Successfully!",
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,

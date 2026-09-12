@@ -138,7 +138,7 @@ class _CustomerOrderTrackerScreenState
 }
 
 // ==========================================
-// 2. ORDER FEEDBACK POPUP DIALOG
+// 2. ORDER FEEDBACK POPUP DIALOG (UPDATED)
 // ==========================================
 class OrderFeedbackDialog extends StatefulWidget {
   final String orderId;
@@ -150,11 +150,10 @@ class OrderFeedbackDialog extends StatefulWidget {
 }
 
 class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
-  int _selectedRating = 5;
+  int _selectedRating = 1; // ✅ minimum/default rating = 1
   final TextEditingController _feedbackController = TextEditingController();
   bool _isLoading = false;
 
-  // Custom Palette Matching
   static const Color dialogBgColor = Color(0xFFFCF8DD);
   static const Color fieldBgColor = Color(0xFFFFFFF0);
   static const Color maroonColor = Color(0xFF800000);
@@ -190,6 +189,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
         'rating': _selectedRating,
         'comment': _feedbackController.text.trim(),
         'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false, // 🟢 manager dashboard badge ke liye zaroori
       });
 
       if (mounted) {
@@ -225,220 +225,155 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
     };
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: dialogBgColor,
-      elevation: 12,
+      elevation: 8,
       child: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Branded Circular Icon Badge
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [maroonColor, Color(0xFFB33A1A)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: maroonColor.withOpacity(0.35),
-                      blurRadius: 16,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.delivery_dining_rounded,
-                  size: 46,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 20),
-
               const Text(
-                'Order Delivered! 🎉',
+                'Order Delivered!',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 22,
+                  fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87,
                   letterSpacing: 0.2,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 4),
               const Text(
-                'Your order has arrived! How was your food?\nYour feedback helps us serve you better.',
+                'How was your food?',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.black54,
-                  height: 1.4,
-                ),
+                style: TextStyle(fontSize: 12, color: Colors.black54),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 14),
 
               // Interactive Rating Bar Card
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 decoration: BoxDecoration(
                   color: fieldBgColor,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.amber.shade100, width: 1.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade100, width: 1),
                 ),
                 child: Column(
                   children: [
-                    Wrap(
-                      alignment: WrapAlignment.center,
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
                       children: List.generate(5, (index) {
                         final starIndex = index + 1;
-                        return IconButton(
-                          onPressed: () {
+                        return GestureDetector(
+                          onTap: () {
                             setState(() {
                               _selectedRating = starIndex;
                             });
                           },
-                          padding: const EdgeInsets.symmetric(horizontal: 2),
-                          constraints: const BoxConstraints(
-                            minWidth: 32,
-                            minHeight: 32,
-                          ),
-                          splashRadius: 20,
-                          icon: AnimatedScale(
-                            scale: starIndex <= _selectedRating ? 1.0 : 0.88,
-                            duration: const Duration(milliseconds: 150),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
                             child: Icon(
                               starIndex <= _selectedRating
                                   ? Icons.star_rounded
                                   : Icons.star_outline_rounded,
                               color: Colors.amber,
-                              size: 32,
+                              size: 22,
                             ),
                           ),
                         );
                       }),
                     ),
-                    const SizedBox(height: 4),
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 150),
-                      child: Text(
-                        ratingLabels[_selectedRating] ?? '',
-                        key: ValueKey(_selectedRating),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: maroonColor,
-                          letterSpacing: 0.3,
-                        ),
+                    Text(
+                      ratingLabels[_selectedRating] ?? '',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: maroonColor,
+                        letterSpacing: 0.3,
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
 
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Additional comments (optional)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black.withOpacity(0.6),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
               TextField(
                 controller: _feedbackController,
-                maxLines: 3,
-                style: const TextStyle(fontSize: 14, color: Colors.black87),
+                maxLines: 2,
+                style: const TextStyle(fontSize: 13, color: Colors.black87),
                 decoration: InputDecoration(
-                  hintText: 'Tell us what you liked or what we can improve...',
-                  hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+                  hintText: 'Comments (optional)...',
+                  hintStyle: const TextStyle(color: Colors.grey, fontSize: 12),
                   filled: true,
                   fillColor: fieldBgColor,
-                  contentPadding: const EdgeInsets.all(14),
+                  contentPadding: const EdgeInsets.all(10),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(
                       color: Colors.amber.shade100,
-                      width: 1.2,
+                      width: 1,
                     ),
                   ),
                   focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(
                       color: maroonColor,
-                      width: 1.6,
+                      width: 1.4,
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 22),
+              const SizedBox(height: 14),
 
               // Submit Button
               SizedBox(
                 width: double.infinity,
-                height: 50,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(14),
-                    boxShadow: [
-                      BoxShadow(
-                        color: maroonColor.withOpacity(0.25),
-                        blurRadius: 12,
-                        offset: const Offset(0, 5),
-                      ),
-                    ],
-                  ),
-                  child: ElevatedButton.icon(
-                    style: ButtonStyle(
-                      backgroundColor: WidgetStateProperty.resolveWith<Color>((
-                        Set<WidgetState> states,
-                      ) {
-                        if (states.contains(WidgetState.pressed)) {
-                          return orangeColor;
-                        }
-                        return maroonColor;
-                      }),
-                      foregroundColor: WidgetStateProperty.all<Color>(
-                        Colors.white,
-                      ),
-                      shape: WidgetStateProperty.all<RoundedRectangleBorder>(
-                        RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      elevation: WidgetStateProperty.all(0),
+                height: 44,
+                child: ElevatedButton.icon(
+                  style: ButtonStyle(
+                    backgroundColor: WidgetStateProperty.resolveWith<Color>((
+                      Set<WidgetState> states,
+                    ) {
+                      if (states.contains(WidgetState.pressed)) {
+                        return orangeColor;
+                      }
+                      return maroonColor;
+                    }),
+                    foregroundColor: WidgetStateProperty.all<Color>(
+                      Colors.white,
                     ),
-                    onPressed: _isLoading ? null : _submitFeedback,
-                    icon: _isLoading
-                        ? const SizedBox.shrink()
-                        : const Icon(Icons.send_rounded, size: 18),
-                    label: _isLoading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2.5,
-                            ),
-                          )
-                        : const Text(
-                            'Submit Feedback',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.3,
-                            ),
-                          ),
+                    shape: WidgetStateProperty.all<RoundedRectangleBorder>(
+                      RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    elevation: WidgetStateProperty.all(0),
                   ),
+                  onPressed: _isLoading ? null : _submitFeedback,
+                  icon: _isLoading
+                      ? const SizedBox.shrink()
+                      : const Icon(Icons.send_rounded, size: 16),
+                  label: _isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.2,
+                          ),
+                        )
+                      : const Text(
+                          'Submit Feedback',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
                 ),
               ),
             ],

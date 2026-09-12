@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../repository/rider_auth_repository.dart'; // Sahi repository link ki hai
+import 'rider/rider_auth_repository.dart'; // Sahi repository link ki hai
 
 class AuthController {
   final FirebaseAuth _auth             = FirebaseAuth.instance;

@@ -279,10 +279,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 👈 CHANGED: FittedBox use kiya taake price kabhi
-                          // ellipsis se cut na ho — pura number hamesha
-                          // dikhega, sirf zaroorat par thoda shrink hoga.
-                          // OFF badge bhi wapis green kar diya.
+                          
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
@@ -497,7 +494,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    // 👈 CHANGED: emoji hataya
+                    
                     "No items available under Rs. $maxBudget",
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -883,7 +880,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                                 calculateHypotheticalFinalPrice(currentPrice);
                             if (projectedFinalPrice > maxBudget) {
                               Navigator.pop(context);
-                              // 👈 CHANGED: emoji hataya, theme color use kiya
+                             
                               _showThemedSnack(
                                 "This exceeds your selected budget.",
                               );

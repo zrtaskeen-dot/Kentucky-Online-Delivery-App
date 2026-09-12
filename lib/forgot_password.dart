@@ -39,7 +39,16 @@ class _ForgotPasswordState extends State<ForgotPassword> {
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      _snack(e.message ?? 'Error sending reset email');
+      switch (e.code) {
+        case 'user-not-found':
+          _snack('No account found with this email.');
+          break;
+        case 'invalid-email':
+          _snack('That email address looks invalid.');
+          break;
+        default:
+          _snack(e.message ?? 'Error sending reset email');
+      }
     } catch (e) {
       _snack('Something went wrong. Try again.');
     } finally {
@@ -86,13 +95,13 @@ class _ForgotPasswordState extends State<ForgotPassword> {
         ),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 // Icon badge (jaisa app ke option cards mein hota hai)
                 Center(
@@ -137,10 +146,14 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                   icon: Icons.email_outlined,
                   keyboardType: TextInputType.emailAddress,
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.trim().isEmpty) {
                       return 'Please enter your email';
-                    } else if (!value.contains('@')) {
-                      return 'Enter a valid email';
+                    }
+                    final emailRegex = RegExp(
+                      r'^[a-zA-Z0-9.a-zA-Z0-9!#$%&*+/=?^_`{|}~-]+@[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$',
+                    );
+                    if (!emailRegex.hasMatch(value.trim())) {
+                      return 'Enter a valid email address';
                     }
                     return null;
                   },

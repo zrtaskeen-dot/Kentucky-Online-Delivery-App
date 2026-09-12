@@ -6,12 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'cart_provider.dart';
 import 'cart_screen.dart';
-import 'foodDetailScreen.dart';
+import 'food_detail_screen.dart';
 import 'pizza_detail.dart';
 import 'models/food_item.dart';
 import 'package:animation/widgets/offer_slider.dart';
 import 'package:animation/smartcombo/smart_combo_price_screen.dart';
-import 'feedback.dart';
+import 'order_tracker.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -34,7 +34,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isSearching = false;
   final TextEditingController _searchController = TextEditingController();
 
-  List<DocumentSnapshot> branchesList = [];
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> branchesList = [];
   String? selectedBranchId;
   String selectedBranchAddress = 'Loading...';
   bool isLoadingBranches = true;
@@ -98,16 +98,15 @@ class _HomeScreenState extends State<HomeScreen> {
         String? userId = FirebaseAuth.instance.currentUser?.uid;
 
         if (token != null && userId != null) {
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(userId)
-              .set({'fcmToken': token}, SetOptions(merge: true));
+          await FirebaseFirestore.instance.collection('users').doc(userId).set({
+            'fcmToken': token,
+          }, SetOptions(merge: true));
 
-          debugPrint("✅ Customer FCM Token Saved Successfully: $token");
+          debugPrint("Customer FCM Token Saved Successfully: $token");
         }
       }
     } catch (e) {
-      debugPrint("❌ FCM Token Error: $e");
+      debugPrint("FCM Token Error: $e");
     }
   }
 
@@ -161,6 +160,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return raw.toUpperCase().trim().replaceAll(RegExp(r'[^A-Z0-9]'), '');
   }
 
+  // ✅ An item counts as "new" if it was added within the last 7 days.
+  bool _isNewItem(FoodItem item) {
+    if (item.createdAt == null) return false;
+    return DateTime.now().difference(item.createdAt!) <=
+        const Duration(days: 7);
+  }
+
   bool _categoryMatches(String itemCategory, String tabCategory) {
     final a = _normalizeCategory(itemCategory);
     final b = _normalizeCategory(tabCategory);
@@ -182,22 +188,25 @@ class _HomeScreenState extends State<HomeScreen> {
         .collection('users')
         .doc(user.uid)
         .snapshots()
-        .listen((doc) {
-          if (!mounted) return;
-          if (doc.exists && doc.data() != null) {
-            final data = doc.data() as Map<String, dynamic>;
-            final name =
-                (data['name'] ?? data['fullName'] ?? data['full_name'] ?? '')
-                    .toString()
-                    .trim();
+        .listen(
+          (doc) {
+            if (!mounted) return;
+            if (doc.exists && doc.data() != null) {
+              final data = doc.data() as Map<String, dynamic>;
+              final name =
+                  (data['name'] ?? data['fullName'] ?? data['full_name'] ?? '')
+                      .toString()
+                      .trim();
 
-            if (name.isNotEmpty) {
-              setState(() => userName = name.split(' ').first.toUpperCase());
+              if (name.isNotEmpty) {
+                setState(() => userName = name.split(' ').first.toUpperCase());
+              }
             }
-          }
-        }, onError: (e) {
-          debugPrint('userName stream error: $e');
-        });
+          },
+          onError: (e) {
+            debugPrint('userName stream error: $e');
+          },
+        );
   }
 
   Future<void> _fetchBranches() async {
@@ -214,7 +223,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      branchesList = snapshot.docs;
+      branchesList = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
+        snapshot.docs,
+      );
       String finalBranchId = snapshot.docs.first.id;
 
       final user = FirebaseAuth.instance.currentUser;
@@ -274,6 +285,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() {
         allItems = snapshot.docs.map((d) => FoodItem.fromFirestore(d)).toList();
+        // ✅ Newest items (by createdAt) show up first everywhere —
+        // "Our Menu", inside each category tab, and in search results.
+        allItems.sort((a, b) {
+          if (a.createdAt == null && b.createdAt == null) return 0;
+          if (a.createdAt == null) return 1;
+          if (b.createdAt == null) return -1;
+          return b.createdAt!.compareTo(a.createdAt!);
+        });
         isLoadingItems = false;
       });
     } catch (e) {
@@ -469,116 +488,235 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBranchDropdown(String? safeDropdownValue) {
     if (branchesList.isEmpty) return const SizedBox();
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(
-            color: Color.fromRGBO(0, 0, 0, 0.06),
-            blurRadius: 10,
-            offset: Offset(0, 3),
-          ),
-        ],
+    final currentDoc = branchesList.firstWhere(
+      (d) => d.id == safeDropdownValue,
+      orElse: () => branchesList.first,
+    );
+    final currentData = currentDoc.data() as Map<String, dynamic>;
+    final currentName = (currentData['branchName'] ?? 'Branch')
+        .toString()
+        .toUpperCase();
+
+    return GestureDetector(
+      onTap: () => _openBranchSelector(safeDropdownValue),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: const [
+            BoxShadow(
+              color: Color.fromRGBO(0, 0, 0, 0.06),
+              blurRadius: 10,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: primary.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.storefront_rounded,
+                color: primary,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    currentName,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.black87,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    selectedBranchAddress,
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.keyboard_arrow_down_rounded, color: primary),
+          ],
+        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: primary.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.storefront_rounded,
-              color: primary,
-              size: 18,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: safeDropdownValue,
-                isExpanded: true,
-                itemHeight: 64,
-                icon: const Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: primary,
-                ),
-                onChanged: (id) {
-                  if (id != null) _handleBranchChange(id);
-                },
-                selectedItemBuilder: (context) {
-                  return branchesList.map((doc) {
-                    final data = doc.data() as Map<String, dynamic>;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
+    );
+  }
+
+  // ✅ Clean, modern branch picker — replaces the old native dropdown.
+  // Each branch gets its own clearly separated, tappable row instead of a
+  // cramped popup menu.
+  void _openBranchSelector(String? safeDropdownValue) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.45,
+          minChildSize: 0.3,
+          maxChildSize: 0.75,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 16, 20, 6),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.start,
                       children: [
                         Text(
-                          (data['branchName'] ?? 'Branch')
-                              .toString()
-                              .toUpperCase(),
-                          style: const TextStyle(
-                            fontSize: 14,
+                          'Select Branch',
+                          style: TextStyle(
+                            fontSize: 17,
                             fontWeight: FontWeight.w800,
                             color: Colors.black87,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          selectedBranchAddress,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.grey[500],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    );
-                  }).toList();
-                },
-                items: branchesList.map((doc) {
-                  final data = doc.data() as Map<String, dynamic>;
-                  return DropdownMenuItem<String>(
-                    value: doc.id,
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.location_on_rounded,
-                          color: primary,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            (data['branchName'] ?? 'Branch')
-                                .toString()
-                                .toUpperCase(),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black87,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
-                  );
-                }).toList(),
+                  ),
+                  const Divider(height: 1, color: Color(0xFFEEEEEE)),
+                  Expanded(
+                    child: ListView.separated(
+                      controller: scrollController,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      itemCount: branchesList.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final doc = branchesList[index];
+                        final data = doc.data() as Map<String, dynamic>;
+                        final name = (data['branchName'] ?? 'Branch')
+                            .toString();
+                        final address =
+                            (data['address'] ?? data['phone'] ?? 'No address')
+                                .toString();
+                        final isSelected = doc.id == safeDropdownValue;
+
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () {
+                            Navigator.pop(context);
+                            _handleBranchChange(doc.id);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? primary.withOpacity(0.08)
+                                  : cardWhite,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected
+                                    ? primary
+                                    : const Color(0xFFEFEFEF),
+                                width: isSelected ? 1.4 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(9),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? primary
+                                        : primary.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    Icons.storefront_rounded,
+                                    color: isSelected ? Colors.white : primary,
+                                    size: 18,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name.toUpperCase(),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.w800,
+                                          color: isSelected
+                                              ? primary
+                                              : Colors.black87,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        address,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey[500],
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (isSelected)
+                                  const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: primary,
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ),
-            ),
-          ),
-        ],
-      ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -804,97 +942,135 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Stack(
           children: [
-            Expanded(
-              flex: 5,
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(20),
-                ),
-                child: item.imageUrl.isEmpty
-                    ? Container(
-                        color: primaryLight,
-                        child: const Icon(
-                          Icons.fastfood_rounded,
-                          size: 50,
-                          color: primary,
-                        ),
-                      )
-                    : Image.network(
-                        item.imageUrl,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
-                          color: primaryLight,
-                          child: const Icon(
-                            Icons.fastfood_rounded,
-                            size: 50,
-                            color: primary,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
+                    child: item.imageUrl.isEmpty
+                        ? Container(
+                            color: primaryLight,
+                            child: const Icon(
+                              Icons.fastfood_rounded,
+                              size: 50,
+                              color: primary,
+                            ),
+                          )
+                        : Image.network(
+                            item.imageUrl,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(
+                              color: primaryLight,
+                              child: const Icon(
+                                Icons.fastfood_rounded,
+                                size: 50,
+                                color: primary,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-              ),
-            ),
-            Expanded(
-              flex: 4,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      item.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 13,
-                        color: Colors.black87,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      item.description,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[500]),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Row(
+                  ),
+                ),
+                Expanded(
+                  flex: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(
-                          child: Text(
-                            _formatPrice(item),
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: primary,
-                              fontSize: 13,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                        Text(
+                          item.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                            color: Colors.black87,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        Container(
-                          width: 28,
-                          height: 28,
-                          decoration: const BoxDecoration(
-                            color: primary,
-                            shape: BoxShape.circle,
+                        Text(
+                          item.description,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[500],
                           ),
-                          child: const Icon(
-                            Icons.add_rounded,
-                            color: Colors.white,
-                            size: 18,
-                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _formatPrice(item),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  color: primary,
+                                  fontSize: 13,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: const BoxDecoration(
+                                color: primary,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.add_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
+                ),
+              ],
+            ),
+            if (_isNewItem(item))
+              Positioned(
+                top: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: primary,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primary.withAlpha(90),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Text(
+                    'NEW',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -948,7 +1124,11 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.symmetric(vertical: 60),
         child: Column(
           children: [
-            Icon(Icons.restaurant_menu_rounded, size: 48, color: primary.withOpacity(0.4)),
+            Icon(
+              Icons.restaurant_menu_rounded,
+              size: 48,
+              color: primary.withOpacity(0.4),
+            ),
             const SizedBox(height: 12),
             Text(
               isSearching ? 'No results found' : 'No items in this category',

@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import 'forgot_password.dart';
-import 'rider/RiderHomeScreen.dart';
+import 'rider/rider_home_screen.dart';
 import 'main_navigation.dart';
 import 'signup_screen.dart';
 import 'fcm_service.dart'; // 👈 ADDED
@@ -53,6 +53,35 @@ class _LoginScreenState extends State<LoginScreen> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // 👈 ADDED: small helper to write to both log collections at once
+  // ────────────────────────────────────────────────────────────
+  Future<void> _logActivity({
+    required String action,
+    required String performedBy,
+    required String role,
+    required String branch,
+    required String details,
+  }) async {
+    try {
+      final payload = {
+        'action': action,
+        'performed_by': performedBy,
+        'role': role,
+        'branch': branch,
+        'details': details,
+        'created_at': FieldValue.serverTimestamp(),
+      };
+      await FirebaseFirestore.instance.collection("system_log").add(payload);
+      await FirebaseFirestore.instance
+          .collection("activity_logs")
+          .add(payload);
+    } catch (e) {
+      // Logging failure should never block login flow.
+      debugPrint('Activity log failed: $e');
+    }
   }
 
   // ────────────────────────────────────────────────────────────
@@ -159,6 +188,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         final riderDoc = snapshot.docs.first;
         final riderId = riderDoc.id;
+        final riderData = riderDoc.data();
+        final riderName =
+            (riderData['name'] ?? riderData['fullName'] ?? email).toString();
+        final branchName = (riderData['branch'] ?? '').toString();
 
         await FirebaseFirestore.instance
             .collection('users')
@@ -169,6 +202,15 @@ class _LoginScreenState extends State<LoginScreen> {
         // Firestore, so the backend has nothing to send push
         // notifications to.
         await FcmService.syncDeviceToken(riderId);
+
+        // 👈 ADDED: log rider login
+        await _logActivity(
+          action: 'Rider Login',
+          performedBy: riderName,
+          role: 'Rider',
+          branch: branchName,
+          details: 'Rider "$riderName" logged in — Branch: "$branchName"',
+        );
 
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -181,8 +223,14 @@ class _LoginScreenState extends State<LoginScreen> {
             .where('email', isEqualTo: email)
             .get();
 
+        String customerName = email;
+
         if (snapshot.docs.isNotEmpty) {
           final userId = snapshot.docs.first.id;
+          final userData = snapshot.docs.first.data();
+          customerName =
+              (userData['name'] ?? userData['fullName'] ?? email).toString();
+
           await FirebaseFirestore.instance
               .collection('users')
               .doc(userId)
@@ -192,6 +240,15 @@ class _LoginScreenState extends State<LoginScreen> {
         // 👈 ADDED: save this device's FCM token now that we know
         // who's logged in.
         await FcmService.syncDeviceToken(user.uid);
+
+        // 👈 ADDED: log customer login
+        await _logActivity(
+          action: 'Customer Login',
+          performedBy: customerName,
+          role: 'Customer',
+          branch: '',
+          details: 'Customer "$customerName" logged in to the app',
+        );
 
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -268,6 +325,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
         // 👈 ADDED
         await FcmService.syncDeviceToken(user.uid);
+
+        // 👈 ADDED: log customer login (google)
+        final googleName =
+            (user.displayName ?? user.email ?? '').toString();
+        await _logActivity(
+          action: 'Customer Login',
+          performedBy: googleName,
+          role: 'Customer',
+          branch: '',
+          details: 'Customer "$googleName" logged in to the app (Google)',
+        );
 
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -390,7 +458,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         _buildDivider(),
                         const SizedBox(height: 20),
                         _buildGoogleButton(
-                          label: "Sign in with Google",
+                          label: "Continue with Google",
                           onTap: _isLoading ? null : _signInWithGoogle,
                         ),
                       ],

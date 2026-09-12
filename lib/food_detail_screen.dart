@@ -125,7 +125,12 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     return total;
   }
 
-  int get totalPrice => (basePrice + toppingsPrice) * quantity;
+  // Base unit price for one item (size + toppings, quantity NOT applied).
+  // This is what gets stored in Firestore's 'price' field, so the cart's
+  // quantity stepper doesn't multiply an already-multiplied price.
+  int get unitPrice => basePrice + toppingsPrice;
+
+  int get totalPrice => unitPrice * quantity;
 
   @override
   void initState() {
@@ -155,11 +160,11 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   Future<void> _addToCart() async {
     setState(() => isAddingToCart = true);
     try {
-      final int price = totalPrice;
+      final int price = unitPrice;
 
       if (price <= 0) {
         debugPrint(
-          '⚠️ totalPrice resolved to 0 for "${widget.item.name}". '
+          '⚠️ unitPrice resolved to 0 for "${widget.item.name}". '
           'Raw prices field: ${widget.item.prices} '
           '(type: ${widget.item.prices.runtimeType}) '
           'basePrice=$basePrice toppingsPrice=$toppingsPrice quantity=$quantity',

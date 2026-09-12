@@ -15,7 +15,8 @@ double _readPriceValue(dynamic raw) {
 }
 
 double _readItemPrice(Map<String, dynamic> item) {
-  final raw = item['price'] ??
+  final raw =
+      item['price'] ??
       item['itemPrice'] ??
       item['unitPrice'] ??
       item['amount'] ??
@@ -33,7 +34,8 @@ double _computeOrderTotal(
   Map<String, dynamic> orderData,
   List<Map<String, dynamic>> items,
 ) {
-  final raw = orderData['totalAmount'] ??
+  final raw =
+      orderData['totalAmount'] ??
       orderData['total_bill'] ??
       orderData['totalPrice'] ??
       orderData['total'] ??
@@ -68,7 +70,24 @@ Stream<QuerySnapshot<Map<String, dynamic>>> _streamMyOrders() {
       .snapshots();
 }
 
-Future<void> _reorderItems(BuildContext context, List<Map<String, dynamic>> items) async {
+// ── HIDE (UI-only "delete") ──
+// Never deletes the Firestore order document — just adds this customer's
+// uid to the order's `hiddenFor` array. OrderHistoryScreen then filters
+// that doc out of the list. The order record stays in the database
+// untouched (for the restaurant's own records/reports).
+Future<void> _hideOrderForUser({
+  required String orderId,
+  required String userId,
+}) async {
+  await FirebaseFirestore.instance.collection('orders').doc(orderId).update({
+    'hiddenFor': FieldValue.arrayUnion([userId]),
+  });
+}
+
+Future<void> _reorderItems(
+  BuildContext context,
+  List<Map<String, dynamic>> items,
+) async {
   final cartsRef = FirebaseFirestore.instance.collection('carts');
   final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
   final cartProvider = Provider.of<CartProvider>(context, listen: false);
@@ -134,12 +153,15 @@ class OrderHistoryScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: themeColor,
         elevation: 0,
         centerTitle: true,
+        automaticallyImplyLeading: false,
         title: const Text(
           "My Orders",
           style: TextStyle(fontWeight: FontWeight.bold, color: creamColor),
@@ -158,7 +180,16 @@ class OrderHistoryScreen extends StatelessWidget {
             return _buildEmptyState();
           }
 
-          final allDocs = snapshot.data!.docs;
+          // Drop any order this customer has hidden from their own list
+          // (via swipe/delete on a past order). The document itself is
+          // untouched in Firestore — this only affects what this
+          // customer sees.
+          final allDocs = snapshot.data!.docs.where((doc) {
+            final hiddenFor = List<String>.from(
+              doc.data()['hiddenFor'] ?? const [],
+            );
+            return !hiddenFor.contains(currentUserId);
+          }).toList();
 
           final activeDocs = allDocs.where((doc) {
             final status = (doc.data()['order_status'] ?? '')
@@ -199,6 +230,8 @@ class OrderHistoryScreen extends StatelessWidget {
               if (activeDocs.isNotEmpty) ...[
                 _sectionHeader("Active Orders", Icons.local_shipping_rounded),
                 const SizedBox(height: 8),
+                // Active orders are NEVER dismissible/deletable — no
+                // Dismissible wrapper here, just the plain card.
                 ...activeDocs.map(
                   (doc) => _OrderCard(
                     orderId: doc.id,
@@ -211,11 +244,31 @@ class OrderHistoryScreen extends StatelessWidget {
               if (pastDocs.isNotEmpty) ...[
                 _sectionHeader("Order History", Icons.history_rounded),
                 const SizedBox(height: 8),
+                // Past orders CAN be swiped away — hides it from this
+                // customer's list only, the order record stays saved.
                 ...pastDocs.map(
-                  (doc) => _OrderCard(
-                    orderId: doc.id,
-                    data: doc.data(),
-                    isPast: true,
+                  (doc) => Dismissible(
+                    key: ValueKey(doc.id),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.delete, color: Colors.white),
+                    ),
+                    confirmDismiss: (_) => _confirmDeleteOrder(context),
+                    onDismissed: (_) {
+                      _hideOrderForUser(orderId: doc.id, userId: currentUserId);
+                    },
+                    child: _OrderCard(
+                      orderId: doc.id,
+                      data: doc.data(),
+                      isPast: true,
+                    ),
                   ),
                 ),
               ],
@@ -224,6 +277,42 @@ class OrderHistoryScreen extends StatelessWidget {
         },
       ),
     );
+  }
+
+  Future<bool> _confirmDeleteOrder(BuildContext context) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Delete order?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black87),
+        ),
+        content: Text(
+          'Do you want to delete this order? It stays on your order '
+          'record — this only removes it from your history list.',
+          style: TextStyle(color: Colors.grey[700], fontSize: 13),
+        ),
+        actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: themeColor),
+            child: const Text(
+              'Delete',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
   }
 
   Widget _sectionHeader(String title, IconData icon) {
@@ -295,6 +384,29 @@ class _OrderCard extends StatelessWidget {
     return "";
   }
 
+  String get _deliveryTime =>
+      (data['delivery_time'] ?? data['deliveryTime'] ?? '—').toString();
+
+  String get _paymentMethod =>
+      (data['payment_method'] ?? data['paymentMethod'] ?? '—').toString();
+
+  // Delivery screen sets this to "Standard Delivery" for immediate
+  // orders, and a formatted date/time string for scheduled orders.
+  bool get _isScheduled => _deliveryTime != "Standard Delivery";
+
+  // Delivery screen sets this to "Cash On Delivery" for COD, and the
+  // provider name (EasyPaisa/JazzCash) for online payments.
+  bool get _isOnlinePayment => _paymentMethod != "Cash On Delivery";
+
+  String get _receiptUrl =>
+      (data['receiptImageUrl'] ?? data['receipt_url'] ?? '').toString();
+
+  // Scheduled + Online orders that haven't had their receipt uploaded
+  // yet aren't confirmed — matches the same check used in
+  // order_history_detail.dart.
+  bool get _needsReceiptUpload =>
+      !isPast && _isScheduled && _isOnlinePayment && _receiptUrl.isEmpty;
+
   Color get _statusColor {
     switch (_status) {
       case 'delivered':
@@ -352,11 +464,7 @@ class _OrderCard extends StatelessWidget {
 
     return InkWell(
       onTap: () {
-        OrderHistoryDetailScreen.show(
-          context,
-          orderId: orderId,
-          data: data,
-        );
+        OrderHistoryDetailScreen.show(context, orderId: orderId, data: data);
       },
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -380,13 +488,68 @@ class _OrderCard extends StatelessWidget {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    "Order #${orderId.substring(0, orderId.length > 6 ? 6 : orderId.length).toUpperCase()}",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                      color: Colors.black87,
-                    ),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          "Order #${orderId.substring(0, orderId.length > 6 ? 6 : orderId.length).toUpperCase()}",
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                      if (_isScheduled) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: themeColor.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: themeColor.withOpacity(0.3),
+                            ),
+                          ),
+                          child: const Text(
+                            "Scheduled",
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: themeColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (_needsReceiptUpload) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.orange.withOpacity(0.35),
+                            ),
+                          ),
+                          child: Text(
+                            "Not Confirmed",
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 Container(
@@ -538,7 +701,10 @@ class _OrderCard extends StatelessWidget {
                     icon: const Icon(Icons.replay_rounded, size: 13),
                     label: const Text(
                       "Reorder",
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
                     ),
                   ),
                 ),

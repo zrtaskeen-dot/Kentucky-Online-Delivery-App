@@ -488,14 +488,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: primary,
-            size: 22,
-          ),
-          onPressed: () => Navigator.pop(context),
-        ),
+        // // leading: IconButton(
+        // //   icon: const Icon(
+        // //     Icons.arrow_back_ios_new_rounded,
+        // //     color: primary,
+        // //     size: 22,
+        // //   ),
+        //   // onPressed: () => Navigator.pop(context),
+        // ),
         title: const Text(
           'My Profile',
           style: TextStyle(

@@ -18,9 +18,8 @@ class RiderProfileScreen extends StatefulWidget {
 }
 
 class _RiderProfileScreenState extends State<RiderProfileScreen> {
-  // -------------------------------------------------------------
-  // ⚙️ CLOUDINARY CONFIGURATION
-  // -------------------------------------------------------------
+ 
+  
   final String _cloudName = "dqjqkwwwh";
   final String _uploadPreset = "rider_profiles";
 

@@ -11,7 +11,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 
 import 'cart_provider.dart';
 import 'firebase.dart';
-import 'orderDetail.dart';
+import 'order_detail.dart';
 
 class DeliveryScreen extends StatefulWidget {
   final double totalAmount;
@@ -47,15 +47,39 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   DateTime? _scheduledDate;
   TimeOfDay? _scheduledTime;
 
+  // Combines the picked date + time into a single DateTime for comparison.
+  DateTime? get _scheduledDateTime {
+    if (_scheduledDate == null || _scheduledTime == null) return null;
+    return DateTime(
+      _scheduledDate!.year,
+      _scheduledDate!.month,
+      _scheduledDate!.day,
+      _scheduledTime!.hour,
+      _scheduledTime!.minute,
+    );
+  }
+
+  // If the customer picked a scheduled time less than 2 hours away, the
+  // "upload later" window has effectively already started — so we skip
+  // the deferred-upload notice and just have them upload the receipt
+  // immediately at checkout instead, same as a "Deliver Now" order.
+  bool get _isScheduledWithinTwoHours {
+    final dt = _scheduledDateTime;
+    if (dt == null) return false;
+    return dt.difference(DateTime.now()) <= const Duration(hours: 2);
+  }
+
   File? _imageFile;
   final ImagePicker _picker = ImagePicker();
-  final TextEditingController _transactionIdController = TextEditingController();
+  final TextEditingController _transactionIdController =
+      TextEditingController();
   final FirestoreService _firestoreService = FirestoreService();
 
   String _receiverPhone = "03185940648";
   bool _loadingManagerPhone = false;
 
-  static const String _cloudinaryUrl = "https://api.cloudinary.com/v1_1/dqjqkwwwh/image/upload";
+  static const String _cloudinaryUrl =
+      "https://api.cloudinary.com/v1_1/dqjqkwwwh/image/upload";
   static const String _receiptUploadPreset = "payment_receipts";
 
   @override
@@ -114,7 +138,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
       if (snap.docs.isNotEmpty) {
         final data = snap.docs.first.data();
-        final phone = (data['phone'] ?? data['phone_number'] ?? '').toString().trim();
+        final phone = (data['phone'] ?? data['phone_number'] ?? '')
+            .toString()
+            .trim();
         if (phone.isNotEmpty) {
           setState(() {
             _receiverPhone = phone;
@@ -152,7 +178,8 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   }
 
   bool _isTimeWithinOperatingHours(TimeOfDay selected) {
-    if (_restaurantTiming.isEmpty || !_restaurantTiming.toLowerCase().contains(' to ')) {
+    if (_restaurantTiming.isEmpty ||
+        !_restaurantTiming.toLowerCase().contains(' to ')) {
       return true;
     }
 
@@ -186,18 +213,22 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
 
     try {
-      final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
+      final RecognizedText recognizedText = await textRecognizer.processImage(
+        inputImage,
+      );
       final String scannedText = recognizedText.text.toLowerCase();
       await textRecognizer.close();
 
       bool isValid = false;
 
       if (provider == 'EasyPaisa') {
-        isValid = scannedText.contains('easypaisa') ||
+        isValid =
+            scannedText.contains('easypaisa') ||
             scannedText.contains('easy paisa') ||
             scannedText.contains('telenor microfinance');
       } else if (provider == 'JazzCash') {
-        isValid = scannedText.contains('jazzcash') ||
+        isValid =
+            scannedText.contains('jazzcash') ||
             scannedText.contains('jazz cash') ||
             scannedText.contains('mobilink microfinance');
       }
@@ -226,25 +257,36 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
   Future<void> _pickReceiptImage() async {
     if (_selectedProvider == null) {
-      _showThemedSnack("Please select EasyPaisa or JazzCash first.", buttonColor);
+      _showThemedSnack(
+        "Please select EasyPaisa or JazzCash first.",
+        buttonColor,
+      );
       return;
     }
 
     try {
-      final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+      final XFile? pickedFile = await _picker.pickImage(
+        source: ImageSource.gallery,
+      );
       if (pickedFile == null) return;
 
       File tempFile = File(pickedFile.path);
 
       // Verify screenshot using OCR
-      bool isVerified = await _verifyImageWithMLKit(tempFile, _selectedProvider!);
+      bool isVerified = await _verifyImageWithMLKit(
+        tempFile,
+        _selectedProvider!,
+      );
       if (!isVerified) return;
 
       setState(() {
         _imageFile = tempFile;
       });
 
-      _showThemedSnack("Valid $_selectedProvider receipt uploaded successfully!", buttonColor);
+      _showThemedSnack(
+        "Valid $_selectedProvider receipt uploaded successfully!",
+        buttonColor,
+      );
     } catch (e) {
       _showThemedSnack("Failed to pick image from gallery.", buttonColor);
     }
@@ -265,7 +307,11 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             Expanded(
               child: Text(
                 message,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13.5),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.5,
+                ),
               ),
             ),
           ],
@@ -337,7 +383,20 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   }
 
   String _formatDate(DateTime d) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${d.day} ${months[d.month - 1]} ${d.year}';
   }
 
@@ -355,7 +414,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       final request = http.MultipartRequest('POST', Uri.parse(_cloudinaryUrl))
         ..fields['upload_preset'] = _receiptUploadPreset
         ..fields['tags'] = _selectedProvider ?? 'payment_receipt'
-        ..files.add(await http.MultipartFile.fromPath('file', _imageFile!.path));
+        ..files.add(
+          await http.MultipartFile.fromPath('file', _imageFile!.path),
+        );
 
       final streamedResponse = await request.send();
       final responseBody = await streamedResponse.stream.bytesToString();
@@ -373,7 +434,8 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
   Future<void> _clearFirestoreCart() async {
     try {
-      final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
+      final userId =
+          FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
       final cartDocs = await FirebaseFirestore.instance
           .collection('carts')
           .where('userId', isEqualTo: userId)
@@ -389,25 +451,45 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
   Future<void> handleOrderConfirmation() async {
     if (_deliveryMode.isEmpty) {
-      _showThemedSnack("Please select a delivery option to proceed.", buttonColor);
+      _showThemedSnack(
+        "Please select a delivery option to proceed.",
+        buttonColor,
+      );
       return;
     }
 
     if (_paymentMode == 'Online' && _selectedProvider == null) {
-      _showThemedSnack("Please select your online payment provider.", buttonColor);
+      _showThemedSnack(
+        "Please select your online payment provider.",
+        buttonColor,
+      );
       return;
     }
 
-    final bool needsReceipt = _paymentMode == 'Online';
+    // For "Deliver Later" + Online payment, the receipt isn't required
+    // right now — the customer uploads it separately, starting 2 hours
+    // before the scheduled delivery time (see the notice shown in
+    // _buildPaymentSelector). EXCEPT when the scheduled time itself is
+    // less than 2 hours away — then the upload window has already
+    // started, so it's required immediately, same as "Deliver Now".
+    final bool needsReceipt =
+        _paymentMode == 'Online' &&
+        (_deliveryMode != 'later' || _isScheduledWithinTwoHours);
 
     if (needsReceipt && _imageFile == null) {
-      _showThemedSnack("Please upload a valid ${_selectedProvider ?? 'Online'} screenshot.", buttonColor);
+      _showThemedSnack(
+        "Please upload a valid ${_selectedProvider ?? 'Online'} screenshot.",
+        buttonColor,
+      );
       return;
     }
 
     if (_deliveryMode == 'later') {
       if (_scheduledDate == null || _scheduledTime == null) {
-        _showThemedSnack("Please select date and time for scheduled delivery.", buttonColor);
+        _showThemedSnack(
+          "Please select date and time for scheduled delivery.",
+          buttonColor,
+        );
         return;
       }
     }
@@ -419,7 +501,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       receiptImageUrl = await _uploadReceiptImage();
       if (receiptImageUrl == null) {
         setState(() => _isLoading = false);
-        _showThemedSnack("Payment receipt upload failed. Please try again.", buttonColor);
+        _showThemedSnack(
+          "Payment receipt upload failed. Please try again.",
+          buttonColor,
+        );
         return;
       }
     }
@@ -429,11 +514,16 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       String activeBranchId = cartProvider.selectedBranchId;
 
       String deliveryTimeLabel = "Standard Delivery";
-      if (_deliveryMode == 'later' && _scheduledDate != null && _scheduledTime != null) {
-        deliveryTimeLabel = "${_formatDate(_scheduledDate!)} at ${_formatTime(_scheduledTime!)}";
+      if (_deliveryMode == 'later' &&
+          _scheduledDate != null &&
+          _scheduledTime != null) {
+        deliveryTimeLabel =
+            "${_formatDate(_scheduledDate!)} at ${_formatTime(_scheduledTime!)}";
       }
 
-      final String finalPaymentMethod = _paymentMode == 'COD' ? 'Cash On Delivery' : (_selectedProvider ?? 'Online Payment');
+      final String finalPaymentMethod = _paymentMode == 'COD'
+          ? 'Cash On Delivery'
+          : (_selectedProvider ?? 'Online Payment');
 
       final String newOrderId = await _firestoreService.saveOrder(
         name: widget.userName,
@@ -445,18 +535,23 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         deliveryTime: deliveryTimeLabel,
         paymentMethod: finalPaymentMethod,
         cartItems: widget.cartItems,
-        transactionId: _transactionIdController.text.isNotEmpty ? _transactionIdController.text : "N/A",
+        transactionId: _transactionIdController.text.isNotEmpty
+            ? _transactionIdController.text
+            : "N/A",
         branchId: activeBranchId,
         receiptImageUrl: receiptImageUrl,
       );
 
       final String? currentUserId = FirebaseAuth.instance.currentUser?.uid;
       if (currentUserId != null) {
-        await FirebaseFirestore.instance.collection('users').doc(currentUserId).set({
-          'phone_number': widget.userPhone,
-          'address': widget.addressDetails,
-          'name': widget.userName,
-        }, SetOptions(merge: true));
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(currentUserId)
+            .set({
+              'phone_number': widget.userPhone,
+              'address': widget.addressDetails,
+              'name': widget.userName,
+            }, SetOptions(merge: true));
       }
 
       await _clearFirestoreCart();
@@ -465,14 +560,24 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       }
 
       setState(() => _isLoading = false);
-      showOrderPopup(deliveryTimeLabel, newOrderId, finalPaymentMethod);
+      showOrderPopup(
+        deliveryTimeLabel,
+        newOrderId,
+        finalPaymentMethod,
+        receiptImageUrl != null,
+      );
     } catch (e) {
       setState(() => _isLoading = false);
       _showThemedSnack("Order processing failed: $e", buttonColor);
     }
   }
 
-  void showOrderPopup(String deliveryTimeLabel, String orderId, String finalPaymentMethod) {
+  void showOrderPopup(
+    String deliveryTimeLabel,
+    String orderId,
+    String finalPaymentMethod,
+    bool receiptUploaded,
+  ) {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -486,6 +591,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           paymentMethod: finalPaymentMethod,
           deliveryLocation: widget.selectedLocation,
           deliveryTime: deliveryTimeLabel,
+          receiptUploaded: receiptUploaded,
         ),
       ),
     );
@@ -504,7 +610,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final int totalItemCount = widget.cartItems.fold(0, (sum, item) => sum + item.quantity);
+    final int totalItemCount = widget.cartItems.fold(
+      0,
+      (sum, item) => sum + item.quantity,
+    );
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -512,10 +621,21 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         backgroundColor: buttonColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: backgroundColor, size: 24),
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: backgroundColor,
+            size: 24,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text("Delivery Options", style: TextStyle(color: backgroundColor, fontWeight: FontWeight.bold, fontSize: 20)),
+        title: const Text(
+          "Delivery Options",
+          style: TextStyle(
+            color: backgroundColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
         centerTitle: true,
       ),
       body: Padding(
@@ -555,14 +675,27 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isSelected ? Colors.white.withOpacity(0.25) : buttonColor.withOpacity(0.1),
+              color: isSelected
+                  ? Colors.white.withOpacity(0.25)
+                  : buttonColor.withOpacity(0.1),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon, color: isSelected ? Colors.black87 : buttonColor, size: 20),
+            child: Icon(
+              icon,
+              color: isSelected ? Colors.black87 : buttonColor,
+              size: 20,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(title, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 17)),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+                fontSize: 17,
+              ),
+            ),
           ),
           Container(
             width: 22,
@@ -570,9 +703,14 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isSelected ? buttonColor : Colors.transparent,
-              border: Border.all(color: isSelected ? buttonColor : Colors.black45, width: 2),
+              border: Border.all(
+                color: isSelected ? buttonColor : Colors.black45,
+                width: 2,
+              ),
             ),
-            child: isSelected ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
+            child: isSelected
+                ? const Icon(Icons.check, size: 14, color: Colors.white)
+                : null,
           ),
         ],
       ),
@@ -633,7 +771,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             if (_restaurantTiming.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(bottom: 14),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: innerFieldColor,
                   borderRadius: BorderRadius.circular(12),
@@ -641,12 +782,20 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.access_time_filled_rounded, color: buttonColor, size: 16),
+                    const Icon(
+                      Icons.access_time_filled_rounded,
+                      color: buttonColor,
+                      size: 16,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         "Operating hours: $_restaurantTiming",
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.black87,
+                        ),
                       ),
                     ),
                   ],
@@ -679,14 +828,28 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                           color: buttonColor.withOpacity(0.12),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.event_available_rounded, color: buttonColor, size: 18),
+                        child: const Icon(
+                          Icons.event_available_rounded,
+                          color: buttonColor,
+                          size: 18,
+                        ),
                       ),
                       const SizedBox(width: 10),
-                      const Text("Select Delivery Slot", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black)),
+                      const Text(
+                        "Select Delivery Slot",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: Colors.black,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  const Text("Schedule orders up to 3 days in advance", style: TextStyle(fontSize: 11.5, color: Colors.black54)),
+                  const Text(
+                    "Schedule orders up to 3 days in advance",
+                    style: TextStyle(fontSize: 11.5, color: Colors.black54),
+                  ),
                   const SizedBox(height: 14),
                   Row(
                     children: [
@@ -694,7 +857,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                         child: _buildAttractiveSlotTile(
                           icon: Icons.calendar_month_rounded,
                           title: "Date",
-                          value: _scheduledDate != null ? _formatDate(_scheduledDate!) : "Select Date",
+                          value: _scheduledDate != null
+                              ? _formatDate(_scheduledDate!)
+                              : "Select Date",
                           isSet: _scheduledDate != null,
                           onTap: _pickScheduleDate,
                         ),
@@ -704,7 +869,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                         child: _buildAttractiveSlotTile(
                           icon: Icons.access_time_filled_rounded,
                           title: "Time",
-                          value: _scheduledTime != null ? _formatTime(_scheduledTime!) : "Select Time",
+                          value: _scheduledTime != null
+                              ? _formatTime(_scheduledTime!)
+                              : "Select Time",
                           isSet: _scheduledTime != null,
                           onTap: _pickScheduleTime,
                         ),
@@ -799,9 +966,17 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           ),
           child: Column(
             children: [
-              _paymentModeTile(icon: Icons.payments_rounded, title: "Cash On Delivery", value: 'COD'),
+              _paymentModeTile(
+                icon: Icons.payments_rounded,
+                title: "Cash On Delivery",
+                value: 'COD',
+              ),
               const Divider(height: 1, color: outlineColor),
-              _paymentModeTile(icon: Icons.account_balance_wallet_rounded, title: "Online Payment", value: 'Online'),
+              _paymentModeTile(
+                icon: Icons.account_balance_wallet_rounded,
+                title: "Online Payment",
+                value: 'Online',
+              ),
             ],
           ),
         ),
@@ -815,9 +990,15 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             ),
             child: Column(
               children: [
-                _providerTile(provider: 'EasyPaisa', icon: Icons.phone_android_rounded),
+                _providerTile(
+                  provider: 'EasyPaisa',
+                  icon: Icons.phone_android_rounded,
+                ),
                 const Divider(height: 1, color: outlineColor),
-                _providerTile(provider: 'JazzCash', icon: Icons.smartphone_rounded),
+                _providerTile(
+                  provider: 'JazzCash',
+                  icon: Icons.smartphone_rounded,
+                ),
               ],
             ),
           ),
@@ -826,7 +1007,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           const SizedBox(height: 14),
           _buildReceiverInfoBanner(),
           const SizedBox(height: 14),
-          _buildReceiptUploadUI(),
+          if (_deliveryMode == 'later' && !_isScheduledWithinTwoHours)
+            _buildScheduledReceiptNotice()
+          else
+            _buildReceiptUploadUI(),
         ],
       ],
     );
@@ -849,12 +1033,20 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: isSelected ? buttonColor : Colors.black54),
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? buttonColor : Colors.black54,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 title,
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: isSelected ? buttonColor : Colors.black87),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: isSelected ? buttonColor : Colors.black87,
+                ),
               ),
             ),
             Container(
@@ -863,9 +1055,14 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: isSelected ? buttonColor : Colors.transparent,
-                border: Border.all(color: isSelected ? buttonColor : Colors.black38, width: 2),
+                border: Border.all(
+                  color: isSelected ? buttonColor : Colors.black38,
+                  width: 2,
+                ),
               ),
-              child: isSelected ? const Icon(Icons.check, size: 12, color: Colors.white) : null,
+              child: isSelected
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
             ),
           ],
         ),
@@ -873,10 +1070,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  Widget _providerTile({
-    required String provider,
-    required IconData icon,
-  }) {
+  Widget _providerTile({required String provider, required IconData icon}) {
     final bool isSelected = _selectedProvider == provider;
     return InkWell(
       onTap: () => setState(() {
@@ -888,12 +1082,20 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: isSelected ? buttonColor : Colors.black54),
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? buttonColor : Colors.black54,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 provider,
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: isSelected ? buttonColor : Colors.black87),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                  color: isSelected ? buttonColor : Colors.black87,
+                ),
               ),
             ),
             Container(
@@ -902,9 +1104,14 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: isSelected ? buttonColor : Colors.transparent,
-                border: Border.all(color: isSelected ? buttonColor : Colors.black38, width: 2),
+                border: Border.all(
+                  color: isSelected ? buttonColor : Colors.black38,
+                  width: 2,
+                ),
               ),
-              child: isSelected ? const Icon(Icons.check, size: 12, color: Colors.white) : null,
+              child: isSelected
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
             ),
           ],
         ),
@@ -931,7 +1138,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                       SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: buttonColor),
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: buttonColor,
+                        ),
                       ),
                       SizedBox(width: 8),
                       Text(
@@ -942,16 +1152,54 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                   )
                 : RichText(
                     text: TextSpan(
-                      style: const TextStyle(fontSize: 12.5, color: Colors.black87),
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        color: Colors.black87,
+                      ),
                       children: [
                         const TextSpan(text: "Transfer payment via "),
-                        TextSpan(text: _selectedProvider ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        TextSpan(
+                          text: _selectedProvider ?? '',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         const TextSpan(text: " to "),
-                        TextSpan(text: _receiverPhone, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        TextSpan(
+                          text: _receiverPhone,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         const TextSpan(text: " and upload the screenshot."),
                       ],
                     ),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduledReceiptNotice() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: buttonColor.withOpacity(0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.schedule_rounded, color: buttonColor, size: 18),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              "You can upload your payment receipt starting 2 hours before "
+              "your scheduled delivery time to confirm this order.",
+              style: TextStyle(
+                fontSize: 12.5,
+                color: Colors.black87,
+                height: 1.4,
+              ),
+            ),
           ),
         ],
       ),
@@ -964,11 +1212,19 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       children: [
         Row(
           children: [
-            const Icon(Icons.receipt_long_rounded, color: buttonColor, size: 18),
+            const Icon(
+              Icons.receipt_long_rounded,
+              color: buttonColor,
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Text(
               "${_selectedProvider ?? 'Payment'} Screenshot",
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                color: Colors.black,
+              ),
             ),
           ],
         ),
@@ -999,12 +1255,19 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 SizedBox(
                   height: 26,
                   width: 26,
-                  child: CircularProgressIndicator(color: buttonColor, strokeWidth: 2.5),
+                  child: CircularProgressIndicator(
+                    color: buttonColor,
+                    strokeWidth: 2.5,
+                  ),
                 ),
                 SizedBox(height: 12),
                 Text(
                   "Verifying screenshot text...",
-                  style: TextStyle(color: buttonColor, fontSize: 13, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: buttonColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ],
             )
@@ -1015,18 +1278,29 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [buttonColor.withOpacity(0.2), buttonColor.withOpacity(0.05)],
+                      colors: [
+                        buttonColor.withOpacity(0.2),
+                        buttonColor.withOpacity(0.05),
+                      ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.cloud_upload_rounded, size: 28, color: buttonColor),
+                  child: const Icon(
+                    Icons.cloud_upload_rounded,
+                    size: 28,
+                    color: buttonColor,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
                   "Upload ${_selectedProvider ?? 'Payment'} Screenshot",
-                  style: const TextStyle(color: Colors.black87, fontSize: 14, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1061,7 +1335,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Colors.black.withOpacity(0), Colors.black.withOpacity(0.6)],
+                  colors: [
+                    Colors.black.withOpacity(0),
+                    Colors.black.withOpacity(0.6),
+                  ],
                 ),
               ),
             ),
@@ -1082,7 +1359,11 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                   SizedBox(width: 4),
                   Text(
                     "Change Screenshot",
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: buttonColor),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: buttonColor,
+                    ),
                   ),
                 ],
               ),
@@ -1093,8 +1374,15 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             right: 10,
             child: Container(
               padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(color: buttonColor, shape: BoxShape.circle),
-              child: const Icon(Icons.check_rounded, size: 14, color: Colors.white),
+              decoration: const BoxDecoration(
+                color: buttonColor,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_rounded,
+                size: 14,
+                color: Colors.white,
+              ),
             ),
           ),
         ],
@@ -1120,41 +1408,80 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text("Order Summary", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black)),
+          const Text(
+            "Order Summary",
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
+          ),
           const SizedBox(height: 14),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Total Items", style: TextStyle(fontSize: 14, color: Colors.black54)),
-              Text("$totalItemCount", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
+              const Text(
+                "Total Items",
+                style: TextStyle(fontSize: 14, color: Colors.black54),
+              ),
+              Text(
+                "$totalItemCount",
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text("Grand Total", style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-              Text("RS. ${widget.totalAmount.toStringAsFixed(0)}", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: buttonColor)),
+              const Text(
+                "Grand Total",
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              Text(
+                "RS. ${widget.totalAmount.toStringAsFixed(0)}",
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: buttonColor,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 18),
           ElevatedButton(
-            onPressed: (_isLoading || _isVerifyingImage) ? null : handleOrderConfirmation,
+            onPressed: (_isLoading || _isVerifyingImage)
+                ? null
+                : handleOrderConfirmation,
             style: ElevatedButton.styleFrom(
               backgroundColor: buttonColor,
               foregroundColor: Colors.white,
               minimumSize: const Size(double.infinity, 48),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: _isLoading
                 ? const SizedBox(
                     height: 20,
                     width: 20,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
                   )
                 : Text(
-                    _deliveryMode == 'later' ? "Confirm Schedule" : "Place Order",
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    _deliveryMode == 'later'
+                        ? "Confirm Schedule"
+                        : "Place Order",
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
           ),
         ],
