@@ -17,30 +17,45 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
 
+  // 👈 Unified brand palette: maroon + orange + white/cream
+  static const Color _maroon = Color(0xFFA70000);
+  static const Color _maroonDark = Color(0xFF7A0000);
+  static const Color _orange = Color(0xFFFF8A00);
+  static const Color _cream = Color(0xFFFFFDF2);
+
   // 👈 CHANGED: Track tab (SizedBox) hata diya gaya hai, ab sirf 4 screens hain
   final List<Widget> _screens = [
     const HomeScreen(),
-     OrderHistoryScreen(),
+    OrderHistoryScreen(),
     const NotificationScreen(),
     const ProfileScreen(),
   ];
 
-  // Selected icon design
+  // Selected icon design — orange circle with a soft glow, white icon on top
+  // so it pops against the maroon bar.
   Widget selectedIcon(IconData icon) {
     return Container(
-      width: 52,
-      height: 52,
-      decoration: const BoxDecoration(
-        color: Color(0xFFFF8A00), // Orange circle
+      width: 44,
+      height: 44,
+      decoration: BoxDecoration(
+        color: _orange,
         shape: BoxShape.circle,
+        border: Border.all(color: _cream, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _orange.withOpacity(0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Icon(icon, color: const Color(0xFFA62600), size: 27),
+      child: Icon(icon, color: Colors.white, size: 21),
     );
   }
 
-  // Normal icon design
+  // Normal icon design — soft cream so it stays readable on the maroon bar
   Widget unselectedIcon(IconData icon) {
-    return Icon(icon, color: const Color(0xFFA62600), size: 27);
+    return Icon(icon, color: _cream.withOpacity(0.75), size: 22);
   }
 
   // Notification icon (selected or not) with an unread-count badge.
@@ -64,7 +79,19 @@ class _MainScreenState extends State<MainScreen> {
         int unreadCount = 0;
 
         if (snapshot.hasData) {
-          unreadCount = snapshot.data!.docs.length;
+          // The query above only filters by userId + isRead — it doesn't
+          // know about per-user "deleted" notifications. Deleting a
+          // notification just adds the uid to that doc's `hiddenFor`
+          // array (see NotificationService.hideNotificationForUser), so
+          // without this filter, a deleted-but-unread notification kept
+          // counting toward the badge even after it disappeared from the
+          // list — matching the same client-side filter NotificationScreen
+          // uses.
+          unreadCount = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>? ?? {};
+            final hiddenFor = List<String>.from(data['hiddenFor'] ?? const []);
+            return !hiddenFor.contains(currentUserId);
+          }).length;
         }
 
         return Stack(
@@ -80,13 +107,14 @@ class _MainScreenState extends State<MainScreen> {
                 top: selected ? -2 : -5,
                 child: Container(
                   padding: const EdgeInsets.all(3),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
+                  decoration: BoxDecoration(
+                    color: _orange,
                     shape: BoxShape.circle,
+                    border: Border.all(color: _cream, width: 1.5),
                   ),
                   constraints: const BoxConstraints(
-                    minWidth: 15,
-                    minHeight: 15,
+                    minWidth: 14,
+                    minHeight: 14,
                   ),
                   child: Text(
                     unreadCount > 9 ? '9+' : '$unreadCount',
@@ -114,29 +142,26 @@ class _MainScreenState extends State<MainScreen> {
 
       body: IndexedStack(index: _currentIndex, children: _screens),
 
-      // Floating Bottom Navigation Bar
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          height: 88,
-          margin: const EdgeInsets.only(left: 24, right: 24, bottom: 18),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFFEF5),
-            borderRadius: BorderRadius.circular(40),
-
-            // Soft shadow
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.08),
-                blurRadius: 15,
-                spreadRadius: 1,
-                offset: const Offset(0, 5),
-              ),
-            ],
+      // Bottom Navigation Bar — plain rectangle, flush with the screen
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [_maroon, _maroonDark],
           ),
-
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(40),
-
+          boxShadow: [
+            BoxShadow(
+              color: _maroon.withOpacity(0.3),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: 66,
             child: BottomNavigationBar(
               currentIndex: _currentIndex,
 
@@ -151,8 +176,8 @@ class _MainScreenState extends State<MainScreen> {
               backgroundColor: Colors.transparent,
               elevation: 0,
 
-              selectedItemColor: const Color(0xFFA62600),
-              unselectedItemColor: const Color(0xFFA62600),
+              selectedItemColor: _orange,
+              unselectedItemColor: _cream.withOpacity(0.75),
 
               showSelectedLabels: false,
               showUnselectedLabels: false,
@@ -195,10 +220,10 @@ class _MainScreenState extends State<MainScreen> {
                   label: 'Profile',
                 ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
+            ), // closes BottomNavigationBar(
+          ), // closes SizedBox(
+        ), // closes SafeArea(
+      ), // closes Container(
+    ); // closes Scaffold( + ends return statement
   }
 }

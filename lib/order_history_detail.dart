@@ -1,8 +1,48 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
 import 'live_tracking.dart';
 import 'receipt_upload_button.dart';
+
+// Rebuilds [builder] every [interval] so time-based UI — like the
+// scheduled-order cancel window — keeps itself up to date while this
+// bottom sheet stays open, instead of only updating when it's first
+// shown. Without this, a customer reading the order details as the
+// clock crosses the 1h30m cutoff wouldn't see the Cancel button
+// disappear until they closed and reopened the sheet.
+class _LiveTicker extends StatefulWidget {
+  const _LiveTicker({
+    required this.builder,
+  }) : interval = const Duration(seconds: 30);
+
+  final WidgetBuilder builder;
+  final Duration interval;
+
+  @override
+  State<_LiveTicker> createState() => _LiveTickerState();
+}
+
+class _LiveTickerState extends State<_LiveTicker> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(widget.interval, (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
+}
 
 double _readPriceValue(dynamic raw) {
   if (raw == null) return 0;
@@ -71,8 +111,8 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   final String orderId;
   final Map<String, dynamic> data;
 
-  static const Color themeColor = Color(0xFFA62600);
-  static const Color bgColor = Color(0xFFFEF9E7);
+  static const Color themeColor = Color(0xFFA70000);
+  static const Color bgColor = Color(0xFFFCF8DD);
   static const Color cardColor = Color(0xFFFFFFF0);
   static const Color lightMaroon = Color(0xFFFFF3F1);
 
@@ -216,6 +256,23 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
   bool get _canUploadReceiptNow => _needsReceiptUpload && _isWithinUploadWindow;
 
+  // How long before the scheduled delivery time a customer is still
+  // allowed to cancel this order.
+  static const Duration _cancelCutoff = Duration(hours: 1, minutes: 30);
+
+  // True while the order can still be cancelled: it must be a scheduled
+  // order, still active (not delivered/cancelled), the scheduled time
+  // must have parsed successfully, and we must be more than 1h30m away
+  // from it. Unlike the upload window above, this fails *closed* if the
+  // time can't be parsed — better to block a cancellation than to let
+  // one through this close to (or past) delivery due to a parsing bug.
+  bool get _canCancelOrder {
+    if (!_isActive || !_isScheduled) return false;
+    final dt = _scheduledDateTime;
+    if (dt == null) return false;
+    return DateTime.now().isBefore(dt.subtract(_cancelCutoff));
+  }
+
   String get _dateLabel {
     final ts = data['createdAt'] ?? data['order_date'];
     if (ts is Timestamp) {
@@ -273,7 +330,10 @@ class OrderHistoryDetailScreen extends StatelessWidget {
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             style: TextButton.styleFrom(foregroundColor: themeColor),
-            child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text(
+              'Delete',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -289,6 +349,75 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     // Order is now hidden from the list — close this detail sheet too,
     // since it no longer has anywhere to return to.
     if (context.mounted) Navigator.of(context).pop();
+  }
+
+  // ── CANCEL (customer-initiated) ──
+  // Only reachable while _canCancelOrder is true, but we re-check the
+  // cutoff right before writing in case a few minutes passed between
+  // opening this confirmation dialog and tapping "Cancel Order".
+  Future<void> _confirmCancelOrder(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Cancel this order?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black87),
+        ),
+        content: Text(
+          'This will cancel your scheduled order for $_deliveryTime. '
+          'This action cannot be undone.',
+          style: TextStyle(color: Colors.grey[700], fontSize: 13),
+        ),
+        actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
+            child: const Text('Keep Order'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text(
+              'Cancel Order',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    if (!_canCancelOrder) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Too close to the delivery time to cancel now."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    await FirebaseFirestore.instance.collection('orders').doc(orderId).update({
+      'order_status': 'cancelled',
+      'cancelledBy': 'customer',
+      'cancelledAt': FieldValue.serverTimestamp(),
+    });
+
+    if (context.mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Your order has been cancelled."),
+          backgroundColor: Colors.black87,
+        ),
+      );
+    }
   }
 
   @override
@@ -343,10 +472,10 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: themeColor.withOpacity(0.1),
+                            color: themeColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                              color: themeColor.withOpacity(0.3),
+                              color: themeColor.withValues(alpha: 0.3),
                             ),
                           ),
                           child: const Text(
@@ -367,10 +496,10 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                             vertical: 3,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.12),
+                            color: Colors.orange.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(
-                              color: Colors.orange.withOpacity(0.35),
+                              color: Colors.orange.withValues(alpha: 0.35),
                             ),
                           ),
                           child: Text(
@@ -412,7 +541,10 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                   icon: const Icon(Icons.delete_outline_rounded, size: 16),
                   label: const Text(
                     "Delete from History",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12.5,
+                    ),
                   ),
                 ),
               ),
@@ -470,7 +602,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: themeColor.withOpacity(0.15)),
+        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(
             color: Colors.black12,
@@ -484,7 +616,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: _statusColor.withOpacity(0.12),
+              color: _statusColor.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -529,7 +661,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: themeColor.withOpacity(0.15)),
+        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(
             color: Colors.black12,
@@ -609,7 +741,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.15)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
@@ -776,6 +908,66 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                 ),
               ],
             ),
+
+            if (_isScheduled && _isActive) ...[
+              const SizedBox(height: 16),
+              _LiveTicker(
+                builder: (context) => _canCancelOrder
+                    ? SizedBox(
+                        width: double.infinity,
+                        height: 46,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _confirmCancelOrder(context),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          icon: const Icon(Icons.cancel_outlined, size: 18),
+                          label: const Text(
+                            "Cancel Order",
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      )
+                    : Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.black12),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.lock_clock_rounded,
+                              size: 18,
+                              color: Colors.black45,
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                "This order can no longer be cancelled — "
+                                "it's within 1 hour 30 minutes of the "
+                                "scheduled delivery time.",
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: Colors.black54,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+            ],
 
             if (_needsReceiptUpload) ...[
               const SizedBox(height: 16),

@@ -114,7 +114,7 @@ class OrderDetailsScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: themeColor.withOpacity(0.15)),
+        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(
             color: Colors.black12,
@@ -132,7 +132,7 @@ class OrderDetailsScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
                   color: (_isPendingReceiptUpload ? Colors.orange : themeColor)
-                      .withOpacity(0.1),
+                      .withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -227,7 +227,7 @@ class OrderDetailsScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withOpacity(0.15)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],

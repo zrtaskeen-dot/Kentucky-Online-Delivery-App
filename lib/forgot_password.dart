@@ -14,9 +14,8 @@ class _ForgotPasswordState extends State<ForgotPassword> {
   bool _isLoading = false;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // 👈 App ka standard theme (checkout/delivery screens jaisa)
-  static const bg = Color(0xFFF9F0E0);
-  static const primary = Color(0xFFA62600);
+  static const bg = Color(0xFFFCF8DD);
+  static const primary = Color(0xFFA70000);
   static const creamText = Color(0xFFFEF9E7);
   static const fieldBg = Color(0xFFFFFFF0);
 
@@ -33,9 +32,9 @@ class _ForgotPasswordState extends State<ForgotPassword> {
 
     try {
       await _auth.sendPasswordResetEmail(email: email);
-      _snack('✅ Password reset email sent to $email');
+      _snack('Password reset email sent to $email');
 
-      // Optional: Navigate back to login screen after short delay
+      //  Navigate back to login screen after short delay
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
@@ -103,12 +102,11 @@ class _ForgotPasswordState extends State<ForgotPassword> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Icon badge (jaisa app ke option cards mein hota hai)
                 Center(
                   child: Container(
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
-                      color: primary.withOpacity(0.1),
+                      color: primary.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -211,7 +209,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -231,7 +229,10 @@ class _ForgotPasswordState extends State<ForgotPassword> {
           prefixIcon: Icon(icon, color: primary, size: 22),
           filled: true,
           fillColor: fieldBg,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 14,
+          ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: Colors.black26, width: 1.0),

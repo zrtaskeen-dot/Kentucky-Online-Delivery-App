@@ -90,6 +90,61 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     );
   }
 
+  // Same as _buildNavItem, but for the Orders tab specifically: overlays
+  // a small red count badge showing how many newly-assigned orders are
+  // waiting on this rider (order_status == 'Assigned', not yet
+  // accepted). The badge hides itself while the rider is already on the
+  // Orders tab — opening that tab is what counts as "having seen" the
+  // new orders — and reappears if a fresh one comes in while they're
+  // elsewhere in the app.
+  Widget _buildOrdersNavIcon(int index) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('orders')
+          .where('riderId', isEqualTo: widget.riderId)
+          .where('order_status', isEqualTo: 'Assigned')
+          .snapshots(),
+      builder: (context, snapshot) {
+        final int newOrdersCount = snapshot.data?.docs.length ?? 0;
+        final bool showBadge = newOrdersCount > 0 && _currentIndex != index;
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            _buildNavItem(Icons.shopping_bag, index),
+            if (showBadge)
+              Positioned(
+                right: -2,
+                top: -2,
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  constraints: const BoxConstraints(
+                    minWidth: 16,
+                    minHeight: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: navBarBg, width: 1.5),
+                  ),
+                  child: Text(
+                    newOrdersCount > 9 ? '9+' : '$newOrdersCount',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider<RiderController>.value(
@@ -112,7 +167,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
               borderRadius: BorderRadius.circular(25),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
+                  color: Colors.black.withValues(alpha: 0.1),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -138,7 +193,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                       label: 'Home',
                     ),
                     BottomNavigationBarItem(
-                      icon: _buildNavItem(Icons.shopping_bag, 1),
+                      icon: _buildOrdersNavIcon(1),
                       label: 'Orders',
                     ),
                     BottomNavigationBarItem(
@@ -274,7 +329,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: primary.withOpacity(0.25)),
+          border: Border.all(color: primary.withValues(alpha: 0.25)),
         ),
         child: Row(
           children: [
@@ -390,7 +445,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                             child: OutlinedButton(
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: primary.withOpacity(0.4),
+                                  color: primary.withValues(alpha: 0.4),
                                 ),
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 14,
@@ -469,9 +524,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: primary.withOpacity(0.06),
+          color: primary.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: primary.withOpacity(0.25)),
+          border: Border.all(color: primary.withValues(alpha: 0.25)),
         ),
         child: Row(
           children: [
@@ -573,8 +628,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                       ),
                       decoration: BoxDecoration(
                         color: entry.isOnline
-                            ? Colors.green.withOpacity(0.15)
-                            : Colors.black.withOpacity(0.06),
+                            ? Colors.green.withValues(alpha: 0.15)
+                            : Colors.black.withValues(alpha: 0.06),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -696,7 +751,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.03),
+                        color: Colors.black.withValues(alpha: 0.03),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -790,6 +845,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                           );
                         }
                       } else if (status == 'Accepted' ||
+                          status == 'Delivery Started' ||
                           status == 'Picked Up' ||
                           status == 'On the Way' ||
                           status == 'Assigned') {
@@ -829,7 +885,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                             borderRadius: BorderRadius.circular(18),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.03),
+                                color: Colors.black.withValues(alpha: 0.03),
                                 blurRadius: 10,
                                 offset: const Offset(0, 4),
                               ),
@@ -951,7 +1007,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                 .toList();
             final acceptedDocs = allDocs.where((d) {
               final s = (d.data() as Map)['order_status'];
-              return s == 'Accepted' || s == 'Picked Up' || s == 'On the Way';
+              return s == 'Accepted' ||
+                  s == 'Delivery Started' ||
+                  s == 'Picked Up' ||
+                  s == 'On the Way';
             }).toList();
 
             return SingleChildScrollView(
@@ -1057,7 +1116,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: primary.withOpacity(0.3),
+              color: primary.withValues(alpha: 0.3),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -1142,6 +1201,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
 
   Color _statusColor(String status) {
     switch (status) {
+      case 'Delivery Started':
+        return Colors.deepPurple.shade400;
       case 'Picked Up':
         return Colors.blue.shade700;
       case 'On the Way':
@@ -1153,11 +1214,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     }
   }
 
-  // Shared "update status" handler — used by the Start Delivery button
-  // and by each status button below. RiderController.updateOrderStatus()
-  // returns false with a specific error when the rider is trying to
-  // START a delivery (Picked Up) while another one is already in
-  // progress, and we show that as a popup here.
+  // NOTE: not currently wired to any button — the Start Delivery button
+  // and each status button below call rc.updateOrderStatus() directly so
+  // they can update this sheet's local state via onSuccess. Kept here in
+  // case a screen outside the sheet needs the same status-update +
+  // one-delivery-popup handling.
   Future<void> _handleStatusUpdate({
     required BuildContext context,
     required RiderController rc,
@@ -1181,29 +1242,86 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   void _showOneDeliveryDialog(BuildContext context, String message) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.info_outline_rounded, color: primary),
-            SizedBox(width: 10),
-            Text('One Delivery at a Time'),
-          ],
-        ),
-        content: Text(
-          message.isNotEmpty
-              ? message
-              : 'You can only have one delivery in progress. Please complete your current delivery before accepting a new one.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'OK',
-              style: TextStyle(color: primary, fontWeight: FontWeight.bold),
-            ),
+      builder: (_) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
-        ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.local_shipping_rounded,
+                  color: primary,
+                  size: 26,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'One Delivery at a Time',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                message.isNotEmpty
+                    ? message
+                    : 'You can only have one delivery in progress. Please complete your current delivery before starting another.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 14,
+                  color: Colors.black54,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 22),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primary,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text(
+                    'GOT IT',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1332,17 +1450,20 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                         // ),
                         const SizedBox(height: 16),
 
-                        // Start Delivery: unlocks the address + the
-                        // sequential status buttons below. Purely a local
-                        // toggle (no Firestore write) — becomes disabled
-                        // the moment it's tapped and stays disabled if the
-                        // sheet is reopened once the order has progressed.
+                        // Start Delivery: this is the real "start" of the
+                        // delivery. It writes order_status: 'Delivery
+                        // Started' and runs the one-active-delivery check —
+                        // if the rider already has another delivery in
+                        // progress, the warning popup appears here instead
+                        // of unlocking the rest of the sheet. On success it
+                        // unlocks the address + the sequential status
+                        // buttons below, and becomes disabled.
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: started
-                                  ? primary.withOpacity(0.35)
+                                  ? primary.withValues(alpha: 0.35)
                                   : primary,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
@@ -1352,15 +1473,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                             ),
                             icon: Icon(
                               Icons.local_shipping_rounded,
-                              color: Colors.white.withOpacity(
-                                started ? 0.7 : 1,
+                              color: Colors.white.withValues(
+                                alpha: started ? 0.7 : 1,
                               ),
                             ),
                             label: Text(
                               'Start Delivery',
                               style: TextStyle(
-                                color: Colors.white.withOpacity(
-                                  started ? 0.7 : 1,
+                                color: Colors.white.withValues(
+                                  alpha: started ? 0.7 : 1,
                                 ),
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
@@ -1368,7 +1489,21 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                             ),
                             onPressed: started
                                 ? null
-                                : () => setLocalState(() => started = true),
+                                : () async {
+                                    final success = await rc.updateOrderStatus(
+                                      orderId,
+                                      'Delivery Started',
+                                    );
+                                    if (!context.mounted) return;
+                                    if (success) {
+                                      setLocalState(() {
+                                        started = true;
+                                        localStatus = 'Delivery Started';
+                                      });
+                                    } else {
+                                      _showOneDeliveryDialog(context, rc.error);
+                                    }
+                                  },
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -1427,6 +1562,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   // completed, can't be re-selected).
   static const List<String> _statusSequence = [
     'Accepted',
+    'Delivery Started',
     'Picked Up',
     'On the Way',
     'Delivered',
@@ -1456,7 +1592,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     Color background;
     Widget label_;
     if (isDone) {
-      background = color.withOpacity(0.35);
+      background = color.withValues(alpha: 0.35);
       label_ = Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -1485,11 +1621,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         ),
       );
     } else {
-      background = color.withOpacity(0.25);
+      background = color.withValues(alpha: 0.25);
       label_ = Text(
         label,
         style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
+          color: Colors.white.withValues(alpha: 0.7),
           fontWeight: FontWeight.bold,
           fontSize: 15,
           letterSpacing: 1,

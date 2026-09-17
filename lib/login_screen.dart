@@ -32,11 +32,20 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
-  // ── Theme (matches the rest of the app) ──
-  static const Color bgColor = Color(0xFFF9F0E0);
-  static const Color themeColor = Color(0xFFA62600);
+  // ── Theme (matches the rest of the app, incl. SignUpScreen) ──
+  static const Color bgColor = Color(0xFFFCF8DD);
+  static const Color themeColor = Color(0xFFA70000);
   static const Color creamColor = Color(0xFFFEF9E7);
   static const Color fieldColor = Color(0xFFFFFFF0);
+
+  // Mirrors SignUpScreen.roleMap — needed here because the Firestore user
+  // document for an email/password sign-up is now created on first
+  // verified login (below), not at sign-up time.
+  static const Map<String, String> roleMap = {
+    'customer': 'R001',
+    'rider': 'R002',
+    'admin': 'R003',
+  };
 
   @override
   void dispose() {
@@ -75,9 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
         'created_at': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection("system_log").add(payload);
-      await FirebaseFirestore.instance
-          .collection("activity_logs")
-          .add(payload);
+      await FirebaseFirestore.instance.collection("activity_logs").add(payload);
     } catch (e) {
       // Logging failure should never block login flow.
       debugPrint('Activity log failed: $e');
@@ -155,10 +162,41 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
 
     final prevUser = FirebaseAuth.instance.currentUser;
-    final String? guestUid =
-        (prevUser != null && prevUser.isAnonymous) ? prevUser.uid : null;
+    final String? guestUid = (prevUser != null && prevUser.isAnonymous)
+        ? prevUser.uid
+        : null;
 
     try {
+      // Before attempting a password sign-in, find out how this email is
+      // actually registered with Firebase Auth — no account, a Google
+      // account, or a real password account — so someone who signed up
+      // with Google (and so never set a password) gets told to use the
+      // Google button instead of a confusing "wrong password" error.
+      //
+      // NOTE: fetchSignInMethodsForEmail() only works when "Email
+      // Enumeration Protection" is OFF for this Firebase project
+      // (Firebase console → Authentication → Settings → User actions).
+      // If that protection is ON, it always returns an empty list
+      // regardless of whether the account exists, and every attempt
+      // falls through to the normal sign-in call below — Firebase's own
+      // error still shows in that case, just without this extra
+      // precision.
+      final methods = await FirebaseAuth.instance.fetchSignInMethodsForEmail(
+        email,
+      );
+
+      if (methods.isEmpty) {
+        _showSnack("User not found. Please sign up first.");
+        return;
+      }
+
+      if (methods.contains('google.com') && !methods.contains('password')) {
+        _showSnack(
+          "This account was registered with Google. Please continue with Google to log in.",
+        );
+        return;
+      }
+
       final userCredential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
       final user = userCredential.user!;
@@ -168,7 +206,6 @@ class _LoginScreenState extends State<LoginScreen> {
         _showSnack("Email not verified. Please check your inbox and verify.");
         return;
       }
-
       if (guestUid != null) {
         await _migrateGuestCart(guestUid, user.uid);
       }
@@ -189,8 +226,8 @@ class _LoginScreenState extends State<LoginScreen> {
         final riderDoc = snapshot.docs.first;
         final riderId = riderDoc.id;
         final riderData = riderDoc.data();
-        final riderName =
-            (riderData['name'] ?? riderData['fullName'] ?? email).toString();
+        final riderName = (riderData['name'] ?? riderData['fullName'] ?? email)
+            .toString();
         final branchName = (riderData['branch'] ?? '').toString();
 
         await FirebaseFirestore.instance
@@ -213,9 +250,16 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (!mounted) return;
-        Navigator.pushReplacement(
+        // Clear the ENTIRE back stack (including the Role Selection screen)
+        // instead of just replacing this route. pushReplacement left Role
+        // Selection (and anything before it) alive underneath, which is
+        // what let the back button return to it, and let old screens (with
+        // their Firestore listeners/dialogs) stay mounted in the background
+        // after switching roles.
+        Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => RiderHomeScreen(riderId: riderId)),
+          (route) => false,
         );
       } else {
         final snapshot = await FirebaseFirestore.instance
@@ -228,13 +272,36 @@ class _LoginScreenState extends State<LoginScreen> {
         if (snapshot.docs.isNotEmpty) {
           final userId = snapshot.docs.first.id;
           final userData = snapshot.docs.first.data();
-          customerName =
-              (userData['name'] ?? userData['fullName'] ?? email).toString();
+          customerName = (userData['name'] ?? userData['fullName'] ?? email)
+              .toString();
 
           await FirebaseFirestore.instance
               .collection('users')
               .doc(userId)
               .update({'emailVerified': true});
+        } else {
+          // No Firestore document yet: this is the first login after this
+          // person verified the email from an email/password sign-up (the
+          // doc is deliberately not created at sign-up time anymore — see
+          // SignUpScreen._signUp). We know they're verified at this point
+          // (checked above), so it's now safe to create their user doc.
+          if (user.displayName != null && user.displayName!.trim().isNotEmpty) {
+            customerName = user.displayName!.trim();
+          }
+
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .set({
+                'name': customerName,
+                'email': email,
+                // 'role' text field removed — roleID is the source of
+                // truth now; look up the display name from the
+                // 'user_role' collection (doc id == roleID) when needed.
+                'roleID': roleMap[widget.role],
+                'createdAt': FieldValue.serverTimestamp(),
+                'emailVerified': true,
+              });
         }
 
         // 👈 ADDED: save this device's FCM token now that we know
@@ -251,9 +318,14 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (!mounted) return;
-        Navigator.pushReplacement(
+        // Clear the entire back stack so Role Selection / Login can't be
+        // reached with the back button, and so this old HomeScreen instance
+        // is properly disposed (stops its pending-feedback listener) if the
+        // user later logs in as a different role on the same device.
+        Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const MainScreen()),
+          (route) => false,
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -278,8 +350,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     final prevUser = FirebaseAuth.instance.currentUser;
-    final String? guestUid =
-        (prevUser != null && prevUser.isAnonymous) ? prevUser.uid : null;
+    final String? guestUid = (prevUser != null && prevUser.isAnonymous)
+        ? prevUser.uid
+        : null;
 
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
@@ -302,33 +375,36 @@ class _LoginScreenState extends State<LoginScreen> {
       final user = userCredential.user;
 
       if (user != null) {
-        if (guestUid != null) {
-          await _migrateGuestCart(guestUid, user.uid);
-        }
-
         final userDoc = FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid);
         final docSnap = await userDoc.get();
 
         if (!docSnap.exists) {
-          await userDoc.set({
-            'name': user.displayName ?? '',
-            'email': user.email ?? '',
-            'role': 'customer',
-            'createdAt': FieldValue.serverTimestamp(),
-            'emailVerified': true,
-          });
-        } else {
-          await userDoc.update({'emailVerified': true});
+          // No account for this Google identity — the login page must
+          // NOT create one. signInWithCredential() already created the
+          // Firebase Auth user though, so sign both of it and the cached
+          // Google session back out, or the next "Continue with Google"
+          // tap would silently succeed via the still-active session
+          // instead of showing the account picker again.
+          await FirebaseAuth.instance.signOut();
+          await GoogleSignIn().signOut();
+          if (!mounted) return;
+          _showSnack("User not found. Please sign up first.");
+          return;
         }
+
+        if (guestUid != null) {
+          await _migrateGuestCart(guestUid, user.uid);
+        }
+
+        await userDoc.update({'emailVerified': true});
 
         // 👈 ADDED
         await FcmService.syncDeviceToken(user.uid);
 
         // 👈 ADDED: log customer login (google)
-        final googleName =
-            (user.displayName ?? user.email ?? '').toString();
+        final googleName = (user.displayName ?? user.email ?? '').toString();
         await _logActivity(
           action: 'Customer Login',
           performedBy: googleName,
@@ -338,9 +414,12 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (!mounted) return;
-        Navigator.pushReplacement(
+        // Same fix as email login: clear the whole stack, don't just
+        // replace the current route.
+        Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const MainScreen()),
+          (route) => false,
         );
       }
     } catch (e) {
@@ -483,8 +562,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextButton.styleFrom(
                                 padding: EdgeInsets.zero,
                                 minimumSize: Size.zero,
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               child: const Text(
                                 "Sign up",
@@ -540,7 +618,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
+                      color: Colors.white.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -571,7 +649,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
                 letterSpacing: 0.1,
-                color: creamColor.withOpacity(0.85),
+                color: creamColor.withValues(alpha: 0.85),
               ),
             ),
           ],
@@ -594,7 +672,7 @@ class _LoginScreenState extends State<LoginScreen> {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -604,7 +682,10 @@ class _LoginScreenState extends State<LoginScreen> {
         controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
-        style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.black87),
+        style: const TextStyle(
+          fontWeight: FontWeight.w500,
+          color: Colors.black87,
+        ),
         validator: validator,
         decoration: InputDecoration(
           filled: true,
@@ -634,12 +715,15 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildDivider() {
     return Row(
       children: [
-        Expanded(child: Divider(color: Colors.black.withOpacity(0.15))),
+        Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 12),
-          child: Text("or", style: TextStyle(color: Colors.black45, fontSize: 12)),
+          child: Text(
+            "or",
+            style: TextStyle(color: Colors.black45, fontSize: 12),
+          ),
         ),
-        Expanded(child: Divider(color: Colors.black.withOpacity(0.15))),
+        Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
       ],
     );
   }

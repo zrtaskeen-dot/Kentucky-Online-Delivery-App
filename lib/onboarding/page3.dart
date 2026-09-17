@@ -7,7 +7,6 @@ class OnboardPage3 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    double screenHeight = MediaQuery.of(context).size.height;
     double screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
@@ -102,7 +101,6 @@ class OnboardPage3 extends StatelessWidget {
             //     fit: BoxFit.contain,
             //   ),
             // ),
-
             const SizedBox(height: 20),
           ],
         ),

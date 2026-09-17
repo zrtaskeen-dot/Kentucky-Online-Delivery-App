@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -10,13 +11,13 @@ import 'package:latlong2/latlong.dart' as latlong;
 import 'cart_provider.dart';
 import 'delivery_type.dart';
 
-class CheckoutLocationScreen extends StatefulWidget {
+class CheckoutScreen extends StatefulWidget {
   final double totalAmount;
   final List<CartItem> cartItems;
   final String branchId;
   final String? userEmail;
 
-  const CheckoutLocationScreen({
+  const CheckoutScreen({
     super.key,
     required this.totalAmount,
     required this.cartItems,
@@ -25,10 +26,10 @@ class CheckoutLocationScreen extends StatefulWidget {
   });
 
   @override
-  State<CheckoutLocationScreen> createState() => _CheckoutLocationScreenState();
+  State<CheckoutScreen> createState() => _CheckoutLocationScreenState();
 }
 
-class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
+class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   GoogleMapController? _mapController;
 
   final _firstNameCtrl = TextEditingController();
@@ -82,10 +83,10 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
   String get _kPhone => 'checkout_phone_$_uid';
   String get _kAddress => 'checkout_address_$_uid';
 
-  static const bg = Color(0xFFF9F0E0);
+  static const bgColor = Colors.white;
   static const primary = Color(0xFFA62600);
   static const creamText = Color(0xFFFEF9E7);
-  static const fieldBg = Color(0xFFFFFFF0);
+  static const fieldBg = Color(0xFFFFFDFA);
 
   @override
   void initState() {
@@ -209,17 +210,24 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
         }
       }
 
+      final String resolvedAddress =
+          bestAddress ??
+          (userSearchQuery ??
+              (_searchCtrl.text.trim().isNotEmpty
+                  ? _searchCtrl.text.trim()
+                  : 'Selected Location'));
+
       setState(() {
-        _addressCtrl.text =
-            bestAddress ??
-            (userSearchQuery ??
-                (_searchCtrl.text.trim().isNotEmpty
-                    ? _searchCtrl.text.trim()
-                    : 'Selected Location'));
+        // Keep the address field and the search field showing the exact
+        // same location so the user never has to update both separately.
+        _addressCtrl.text = resolvedAddress;
+        _searchCtrl.text = resolvedAddress;
       });
     } catch (_) {
+      final fallback = userSearchQuery ?? _searchCtrl.text.trim();
       setState(() {
-        _addressCtrl.text = userSearchQuery ?? _searchCtrl.text.trim();
+        _addressCtrl.text = fallback;
+        _searchCtrl.text = fallback;
       });
     }
   }
@@ -357,14 +365,25 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
         final loc = data['result']['geometry']['location'];
         final target = LatLng(loc['lat'], loc['lng']);
 
-        // Set the exact search description user tapped directly to address field
-        final String finalAddress = selectedDescription.isNotEmpty
-            ? selectedDescription
-            : (data['result']['formatted_address'] ?? 'Selected Location');
+        // Prefer the full, proper address from Place Details
+        // (formatted_address) over the short autocomplete description,
+        // so the field shows a complete address rather than just a
+        // place/area name. Fall back to the description only if Google
+        // didn't return a formatted address at all.
+        final String? formattedAddress =
+            data['result']['formatted_address'] as String?;
+        final String finalAddress =
+            (formattedAddress != null && formattedAddress.trim().isNotEmpty)
+            ? formattedAddress
+            : (selectedDescription.isNotEmpty
+                  ? selectedDescription
+                  : 'Selected Location');
 
         setState(() {
           _pinLatLng = target;
+          // Keep both fields showing the exact same resolved location.
           _addressCtrl.text = finalAddress;
+          _searchCtrl.text = finalAddress;
           _isSearching = false;
         });
 
@@ -374,6 +393,65 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
       } else {
         setState(() => _isSearching = false);
         _snack('Could not fetch that location. Please try again.');
+      }
+    } catch (_) {
+      setState(() => _isSearching = false);
+      _snack(
+        'Could not fetch that location. Please check your internet connection.',
+      );
+    }
+  }
+
+  // Handles the case where the user types an address and hits
+  // search/enter instead of tapping a suggestion from the dropdown.
+  // If suggestions are already showing, the top one is used (same
+  // outcome as tapping it). Otherwise we forward-geocode whatever text
+  // they typed so the map still moves to match the search field.
+  Future<void> _handleSearchSubmit(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+
+    FocusScope.of(context).unfocus();
+
+    if (_predictions.isNotEmpty) {
+      await _selectPrediction(_predictions.first);
+      return;
+    }
+
+    setState(() => _isSearching = true);
+
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?address=${Uri.encodeComponent(trimmed)}'
+        '&region=pk'
+        '&key=$_placesApiKey',
+      );
+
+      final res = await http.get(url);
+      final data = jsonDecode(res.body);
+
+      if (data['status'] == 'OK' && (data['results'] as List).isNotEmpty) {
+        final result = data['results'][0];
+        final loc = result['geometry']['location'];
+        final target = LatLng(loc['lat'], loc['lng']);
+        final String fullAddress =
+            (result['formatted_address'] as String?) ?? trimmed;
+
+        setState(() {
+          _pinLatLng = target;
+          _addressCtrl.text = fullAddress;
+          _searchCtrl.text = fullAddress;
+          _isSearching = false;
+        });
+
+        _checkZone();
+        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, 16.0));
+      } else {
+        setState(() => _isSearching = false);
+        _snack(
+          'Could not find that location. Please try selecting from the suggestions.',
+        );
       }
     } catch (_) {
       setState(() => _isSearching = false);
@@ -508,7 +586,7 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: primary,
         elevation: 2,
@@ -609,6 +687,7 @@ class _CheckoutLocationScreenState extends State<CheckoutLocationScreen> {
                             controller: _searchCtrl,
                             textInputAction: TextInputAction.search,
                             onChanged: _onSearchChanged,
+                            onSubmitted: _handleSearchSubmit,
                             style: const TextStyle(fontSize: 13.5),
                             decoration: InputDecoration(
                               hintText: 'Search street, area, or sector...',

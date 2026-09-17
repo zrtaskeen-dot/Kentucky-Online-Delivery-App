@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
 import 'cart_provider.dart';
 import 'order_history_detail.dart';
 
@@ -86,8 +87,9 @@ Future<void> _hideOrderForUser({
 
 Future<void> _reorderItems(
   BuildContext context,
-  List<Map<String, dynamic>> items,
-) async {
+  List<Map<String, dynamic>> items, {
+  required String? branchId,
+}) async {
   final cartsRef = FirebaseFirestore.instance.collection('carts');
   final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
   final cartProvider = Provider.of<CartProvider>(context, listen: false);
@@ -116,6 +118,9 @@ Future<void> _reorderItems(
       await doc.reference.update({
         'quantity': currentQty + quantity,
         if (currentPrice <= 0) 'price': price,
+        // Backfill branchId on older cart rows that predate this field,
+        // so they also start counting toward the Home Screen cart badge.
+        if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
       });
     } else {
       await cartsRef.add({
@@ -125,6 +130,10 @@ Future<void> _reorderItems(
         'price': price,
         'category': category,
         'quantity': quantity,
+        // ✅ Home Screen's cart badge filters carts by branchId — without
+        // this field, reordered items were saved but invisible to the
+        // badge count (it would silently stay at 0 / not fill up).
+        if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
       });
     }
 
@@ -143,8 +152,8 @@ Future<void> _reorderItems(
 class OrderHistoryScreen extends StatelessWidget {
   const OrderHistoryScreen({super.key});
 
-  static const Color themeColor = Color(0xFFA62600);
-  static const Color bgColor = Color(0xFFF9F0E0);
+  static const Color themeColor = Color(0xFFA70000);
+  static const Color bgColor = Color(0xFFFCF8DD);
   static const Color creamColor = Color(0xFFFEF9E7);
   static const Color cardColor = Color(0xFFFFFFF0);
   static const Color outlineColor = Colors.black26;
@@ -340,7 +349,7 @@ class OrderHistoryScreen extends StatelessWidget {
           Icon(
             Icons.receipt_long_rounded,
             size: 50,
-            color: themeColor.withOpacity(0.4),
+            color: themeColor.withValues(alpha: 0.4),
           ),
           const SizedBox(height: 10),
           const Text(
@@ -351,6 +360,46 @@ class OrderHistoryScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+// Rebuilds [builder] every [interval] so time-based UI — like the
+// scheduled-order cancel window — keeps itself up to date while the
+// screen stays open, instead of only updating on the next Firestore
+// snapshot. Without this, a customer watching the screen as the clock
+// crosses the 1h30m cutoff wouldn't see the Cancel button disappear
+// until something else (a data change, re-navigating, etc.) triggered
+// a rebuild.
+class _LiveTicker extends StatefulWidget {
+  const _LiveTicker({
+    required this.builder,
+  }) : interval = const Duration(seconds: 30);
+
+  final WidgetBuilder builder;
+  final Duration interval;
+
+  @override
+  State<_LiveTicker> createState() => _LiveTickerState();
+}
+
+class _LiveTickerState extends State<_LiveTicker> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(widget.interval, (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(context);
 }
 
 class _OrderCard extends StatelessWidget {
@@ -407,6 +456,65 @@ class _OrderCard extends StatelessWidget {
   bool get _needsReceiptUpload =>
       !isPast && _isScheduled && _isOnlinePayment && _receiptUrl.isEmpty;
 
+  // Parses delivery_screen.dart's "6 Sep 2026 at 05:30 PM" label back
+  // into a DateTime — same parsing as order_history_detail.dart, kept
+  // in sync so both screens agree on the cancel cutoff.
+  DateTime? get _scheduledDateTime {
+    if (!_isScheduled) return null;
+    try {
+      final parts = _deliveryTime.split(' at ');
+      if (parts.length != 2) return null;
+
+      final dateSegs = parts[0].trim().split(' ');
+      if (dateSegs.length != 3) return null;
+      final day = int.tryParse(dateSegs[0]);
+      final year = int.tryParse(dateSegs[2]);
+      const months = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+      final month = months.indexOf(dateSegs[1]) + 1;
+      if (day == null || year == null || month == 0) return null;
+
+      final timeMatch = RegExp(
+        r'^(\d{1,2}):(\d{2})\s*(AM|PM)$',
+        caseSensitive: false,
+      ).firstMatch(parts[1].trim());
+      if (timeMatch == null) return null;
+
+      int hour = int.parse(timeMatch.group(1)!);
+      final minute = int.parse(timeMatch.group(2)!);
+      final period = timeMatch.group(3)!.toUpperCase();
+      if (period == 'PM' && hour != 12) hour += 12;
+      if (period == 'AM' && hour == 12) hour = 0;
+
+      return DateTime(year, month, day, hour, minute);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // How long before the scheduled delivery time a customer can still
+  // cancel. Fails closed if the time can't be parsed.
+  static const Duration _cancelCutoff = Duration(hours: 1, minutes: 30);
+
+  bool get _canCancelOrder {
+    if (isPast || !_isScheduled) return false;
+    final dt = _scheduledDateTime;
+    if (dt == null) return false;
+    return DateTime.now().isBefore(dt.subtract(_cancelCutoff));
+  }
+
   Color get _statusColor {
     switch (_status) {
       case 'delivered':
@@ -421,7 +529,65 @@ class _OrderCard extends StatelessWidget {
     }
   }
 
+  Future<void> _confirmCancelOrder(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Cancel this order?',
+          style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black87),
+        ),
+        content: Text(
+          'This will cancel your scheduled order for $_deliveryTime. '
+          'This action cannot be undone.',
+          style: TextStyle(color: Colors.grey[700], fontSize: 13),
+        ),
+        actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
+            child: const Text('Keep Order'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text(
+              'Cancel Order',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    if (!_canCancelOrder) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Too close to the delivery time to cancel now."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    await FirebaseFirestore.instance.collection('orders').doc(orderId).update({
+      'order_status': 'cancelled',
+      'cancelledBy': 'customer',
+      'cancelledAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   void _showCancellationDialog(BuildContext context) {
+    final bool cancelledByCustomer =
+        (data['cancelledBy'] ?? '').toString() == 'customer';
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -436,9 +602,11 @@ class _OrderCard extends StatelessWidget {
             ),
           ],
         ),
-        content: const Text(
-          "Your order has been cancelled by the restaurant manager due to an invalid payment receipt.",
-          style: TextStyle(fontSize: 14, color: Colors.black87),
+        content: Text(
+          cancelledByCustomer
+              ? "You cancelled this order."
+              : "Your order has been cancelled by the restaurant manager due to an invalid payment receipt.",
+          style: const TextStyle(fontSize: 14, color: Colors.black87),
         ),
         actions: [
           ElevatedButton(
@@ -476,7 +644,7 @@ class _OrderCard extends StatelessWidget {
           border: Border.all(color: outlineColor),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withValues(alpha: 0.03),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
@@ -509,10 +677,10 @@ class _OrderCard extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: themeColor.withOpacity(0.1),
+                            color: themeColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: themeColor.withOpacity(0.3),
+                              color: themeColor.withValues(alpha: 0.3),
                             ),
                           ),
                           child: const Text(
@@ -533,10 +701,10 @@ class _OrderCard extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.orange.withOpacity(0.12),
+                            color: Colors.orange.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: Colors.orange.withOpacity(0.35),
+                              color: Colors.orange.withValues(alpha: 0.35),
                             ),
                           ),
                           child: Text(
@@ -558,7 +726,7 @@ class _OrderCard extends StatelessWidget {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: _statusColor.withOpacity(0.12),
+                    color: _statusColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Text(
@@ -595,7 +763,7 @@ class _OrderCard extends StatelessWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: themeColor.withOpacity(0.1),
+                        color: themeColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Row(
@@ -657,6 +825,44 @@ class _OrderCard extends StatelessWidget {
               ],
             ),
 
+            if (_isScheduled && !isPast) ...[
+              const SizedBox(height: 8),
+              _LiveTicker(
+                builder: (context) => _canCancelOrder
+                    ? SizedBox(
+                        width: double.infinity,
+                        height: 32,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _confirmCancelOrder(context),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            padding: EdgeInsets.zero,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          icon: const Icon(Icons.cancel_outlined, size: 14),
+                          label: const Text(
+                            "Cancel Order",
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      )
+                    : Text(
+                        "Can't cancel — within 1h 30m of delivery",
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+              ),
+            ],
+
             if (_status == 'cancelled') ...[
               const SizedBox(height: 8),
               SizedBox(
@@ -688,7 +894,11 @@ class _OrderCard extends StatelessWidget {
                 child: SizedBox(
                   height: 30,
                   child: ElevatedButton.icon(
-                    onPressed: () async => await _reorder(context, items),
+                    onPressed: () async => await _reorder(
+                      context,
+                      items,
+                      (data['branchId'] ?? '').toString(),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: themeColor,
                       foregroundColor: Colors.white,
@@ -739,7 +949,7 @@ class _OrderCard extends StatelessWidget {
     return Container(
       width: 36,
       height: 36,
-      color: themeColor.withOpacity(0.1),
+      color: themeColor.withValues(alpha: 0.1),
       child: const Icon(Icons.fastfood_rounded, color: themeColor, size: 18),
     );
   }
@@ -749,7 +959,7 @@ class _OrderCard extends StatelessWidget {
       width: 36,
       height: 36,
       decoration: BoxDecoration(
-        color: themeColor.withOpacity(0.1),
+        color: themeColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       alignment: Alignment.center,
@@ -767,8 +977,9 @@ class _OrderCard extends StatelessWidget {
   Future<void> _reorder(
     BuildContext context,
     List<Map<String, dynamic>> items,
+    String? branchId,
   ) async {
-    await _reorderItems(context, items);
+    await _reorderItems(context, items, branchId: branchId);
 
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

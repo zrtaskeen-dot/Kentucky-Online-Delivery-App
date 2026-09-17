@@ -19,7 +19,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
   // ── Theme (matches app's maroon/cream palette) ──
-  static const Color primaryRed = Color(0xFFD32F2F);
+  static const Color primaryRed = Color(0xFFA70000);
   static const Color deepRed = Color(0xFF9A1B1B);
   static const Color creamColor = Color(0xFFFFFDF3);
 
@@ -89,7 +89,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                         "Build your own combo",
                         style: TextStyle(
                           fontSize: 15,
-                          color: creamColor.withOpacity(0.9),
+                          color: creamColor.withValues(alpha: 0.9),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -98,7 +98,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                         "Pick a budget to see what fits",
                         style: TextStyle(
                           fontSize: 12,
-                          color: creamColor.withOpacity(0.65),
+                          color: creamColor.withValues(alpha: 0.65),
                         ),
                       ),
                     ],
@@ -124,7 +124,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
+                        color: Colors.black.withValues(alpha: 0.15),
                         blurRadius: 20,
                         offset: const Offset(0, 6),
                       ),
@@ -140,7 +140,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: primaryRed.withOpacity(0.1),
+                              color: primaryRed.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: const Icon(
@@ -231,7 +231,6 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                             return numA.compareTo(numB);
                           });
 
-                          
                           return ListView.builder(
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
@@ -270,7 +269,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                                             size: 16,
                                             color: isSelected
                                                 ? Colors.white
-                                                : primaryRed.withOpacity(0.55),
+                                                : primaryRed.withValues(alpha: 0.55),
                                           ),
                                         ),
                                         if (!isLast)
@@ -330,11 +329,11 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                                               boxShadow: [
                                                 BoxShadow(
                                                   color: isSelected
-                                                      ? primaryRed.withOpacity(
-                                                          0.28,
+                                                      ? primaryRed.withValues(
+                                                          alpha: 0.28,
                                                         )
                                                       : Colors.black
-                                                            .withOpacity(0.04),
+                                                            .withValues(alpha: 0.04),
                                                   blurRadius: isSelected
                                                       ? 10
                                                       : 5,

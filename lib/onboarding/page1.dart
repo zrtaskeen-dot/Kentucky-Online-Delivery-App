@@ -20,8 +20,8 @@ class OnboardPage1 extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(20), // inner spacing
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(
-                    0.8,
+                  color: Colors.white.withValues(
+                    alpha: 0.8,
                   ), // optional light background
                   borderRadius: BorderRadius.circular(15), // rounded corners
                   border: Border.all(color: Colors.orange, width: 2), // border

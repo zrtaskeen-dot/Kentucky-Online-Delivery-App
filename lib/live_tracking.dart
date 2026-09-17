@@ -12,8 +12,8 @@ class LiveTrackingScreen extends StatefulWidget {
 }
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
-  static const primary = Color(0xFFA62600);
-  static const bgColor = Color(0xFFFFFDF0);
+  static const primary = Color(0xFFA70000);
+  static const bgColor = Color(0xFFFCF8DD);
 
   GoogleMapController? _mapController;
 
@@ -62,9 +62,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       northeast: LatLng(maxLat, maxLng),
     );
 
-    _mapController!.animateCamera(
-      CameraUpdate.newLatLngBounds(bounds, 80),
-    );
+    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
   }
 
   @override

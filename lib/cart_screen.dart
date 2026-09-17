@@ -297,7 +297,7 @@ class CartScreen extends StatelessWidget {
                                           context,
                                           MaterialPageRoute(
                                             builder: (_) =>
-                                                CheckoutLocationScreen(
+                                                CheckoutScreen(
                                                   totalAmount: grandTotal,
                                                   cartItems:
                                                       structuredCartItems,
@@ -314,7 +314,7 @@ class CartScreen extends StatelessWidget {
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => CheckoutLocationScreen(
+                                    builder: (_) => CheckoutScreen(
                                       totalAmount: grandTotal,
                                       cartItems: structuredCartItems,
                                       branchId: globalBranchId,
@@ -361,7 +361,7 @@ class CartScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: themeColor.withOpacity(0.15)),
+        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
@@ -496,7 +496,7 @@ class CartScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: themeColor.withOpacity(0.15)),
+        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
@@ -627,7 +627,7 @@ class CartScreen extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             border: Border.symmetric(
-              horizontal: BorderSide(color: themeColor.withOpacity(0.4)),
+              horizontal: BorderSide(color: themeColor.withValues(alpha: 0.4)),
             ),
           ),
           child: Text(
@@ -652,7 +652,7 @@ class CartScreen extends StatelessWidget {
         height: 32,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: themeColor.withOpacity(0.4)),
+          border: Border.all(color: themeColor.withValues(alpha: 0.4)),
         ),
         child: Text(
           label,

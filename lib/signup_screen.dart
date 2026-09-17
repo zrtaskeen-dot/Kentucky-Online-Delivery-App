@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import 'login_screen.dart';
 import 'main_navigation.dart';
@@ -26,8 +27,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscurePassword = true;
 
   // ── Theme ──
-  static const Color bgColor = Color(0xFFF9F0E0);
-  static const Color themeColor = Color(0xFFA62600);
+  static const Color bgColor = Color(0xFFFCF8DD);
+  static const Color themeColor = Color(0xFFA70000);
   static const Color creamColor = Color(0xFFFEF9E7);
   static const Color fieldColor = Color(0xFFFFFFF0);
 
@@ -45,7 +46,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
   String? _validateEmail(String? value) {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return 'Enter your email';
-    if (!_emailRegex.hasMatch(v)) return 'Only @gmail.com addresses are allowed';
+    if (!_emailRegex.hasMatch(v)) {
+      return 'Only @gmail.com addresses are allowed';
+    }
     return null;
   }
 
@@ -141,8 +144,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
     setState(() => _isLoading = true);
 
     final prevUser = FirebaseAuth.instance.currentUser;
-    final String? guestUid =
-        (prevUser != null && prevUser.isAnonymous) ? prevUser.uid : null;
+    final String? guestUid = (prevUser != null && prevUser.isAnonymous)
+        ? prevUser.uid
+        : null;
 
     try {
       final credential = await FirebaseAuth.instance
@@ -154,15 +158,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await credential.user!.sendEmailVerification();
       await credential.user!.updateDisplayName(_nameController.text.trim());
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(credential.user!.uid)
-          .set({
-            'name': _nameController.text.trim(),
-            'email': _emailController.text.trim(),
-            'roleID': roleMap[widget.role],
-            'isEmailVerified': false,
-          });
+      // NOTE: The Firestore 'users' document is intentionally NOT created
+      // here anymore. It's created only after the user successfully
+      // verifies their email and logs in for the first time (see
+      // LoginScreen._signIn in login_screen.dart). This guarantees that if
+      // someone never verifies their email, no Firestore user document (or
+      // any other user data keyed off it) ever gets created for them —
+      // only the unverified Firebase Auth account exists until then.
 
       if (guestUid != null) {
         await _migrateGuestCart(guestUid, credential.user!.uid);
@@ -173,7 +175,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await FcmService.syncDeviceToken(credential.user!.uid);
 
       if (!mounted) return;
-      _showSnack("Verification email sent. Please check your email.");
+      _showSnack(
+        "Verification email sent. Please verify your email, then log in.",
+      );
 
       Navigator.pushReplacement(
         context,
@@ -183,6 +187,97 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
     } on FirebaseAuthException catch (e) {
       _showSnack(e.message ?? 'Registration failed');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // GOOGLE SIGN-UP — mirror image of the login page's Google flow.
+  // The login page's "Continue with Google" refuses to create an
+  // account; this one is the opposite: it creates the account if this
+  // is a brand-new Google identity, and if one already exists it backs
+  // out and tells the person to log in instead (so tapping this button
+  // twice can't silently just log an existing user back in without
+  // going through the sign-up screen's role/consent).
+  // ────────────────────────────────────────────────────────────
+
+  Future<void> _signUpWithGoogle() async {
+    setState(() => _isLoading = true);
+
+    final prevUser = FirebaseAuth.instance.currentUser;
+    final String? guestUid = (prevUser != null && prevUser.isAnonymous)
+        ? prevUser.uid
+        : null;
+
+    try {
+      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+
+      if (googleUser == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      final OAuthCredential credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      final UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithCredential(credential);
+      final user = userCredential.user;
+
+      if (user == null) return;
+
+      final userDoc = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid);
+      final docSnap = await userDoc.get();
+
+      if (docSnap.exists) {
+        // Already has an account — don't silently log them in from the
+        // sign-up screen. Back the Google session out and send them to
+        // log in instead.
+        await FirebaseAuth.instance.signOut();
+        await GoogleSignIn().signOut();
+        if (!mounted) return;
+        _showSnack(
+          "An account already exists for this Google email. Please log in instead.",
+        );
+        return;
+      }
+
+      await userDoc.set({
+        'name': user.displayName ?? '',
+        'email': user.email ?? '',
+        // 'role' text field removed — roleID (below) is the source of
+        // truth now; look up the display name from the 'user_role'
+        // collection (doc id == roleID) when the role name is needed.
+        'roleID': roleMap[widget.role],
+        'createdAt': FieldValue.serverTimestamp(),
+        // Google already verifies the email address, so there's no
+        // separate email-verification step to wait on like there is
+        // for the email/password sign-up path above.
+        'emailVerified': true,
+      });
+
+      if (guestUid != null) {
+        await _migrateGuestCart(guestUid, user.uid);
+      }
+
+      await FcmService.syncDeviceToken(user.uid);
+
+      if (!mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+        (route) => false,
+      );
+    } catch (e) {
+      _showSnack("Google Sign-Up failed: $e");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -298,6 +393,18 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ),
                       ),
 
+                      // Google sign-up is a customer-only shortcut, same
+                      // as the login page's Google button.
+                      if (widget.role != 'rider') ...[
+                        const SizedBox(height: 24),
+                        _buildDivider(),
+                        const SizedBox(height: 20),
+                        _buildGoogleButton(
+                          label: "Continue with Google",
+                          onTap: _isLoading ? null : _signUpWithGoogle,
+                        ),
+                      ],
+
                       const SizedBox(height: 28),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -377,7 +484,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
+                      color: Colors.white.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -408,10 +515,56 @@ class _SignUpScreenState extends State<SignUpScreen> {
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
                 letterSpacing: 0.1,
-                color: creamColor.withOpacity(0.85),
+                color: creamColor.withValues(alpha: 0.85),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDivider() {
+    return Row(
+      children: [
+        Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            "or",
+            style: TextStyle(color: Colors.black45, fontSize: 12),
+          ),
+        ),
+        Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
+      ],
+    );
+  }
+
+  Widget _buildGoogleButton({required String label, VoidCallback? onTap}) {
+    return SizedBox(
+      width: double.infinity,
+      height: 52,
+      child: OutlinedButton.icon(
+        onPressed: onTap,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: fieldColor,
+          side: const BorderSide(color: Colors.black26),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
+        ),
+        icon: const Icon(
+          Icons.g_mobiledata_rounded,
+          color: themeColor,
+          size: 26,
+        ),
+        label: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.black87,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
         ),
       ),
     );
@@ -431,7 +584,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -470,7 +623,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
       ),
     );
   }
-
 }
 
 class _WaveClipper extends CustomClipper<Path> {

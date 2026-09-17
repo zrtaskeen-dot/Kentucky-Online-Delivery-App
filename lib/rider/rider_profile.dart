@@ -18,8 +18,6 @@ class RiderProfileScreen extends StatefulWidget {
 }
 
 class _RiderProfileScreenState extends State<RiderProfileScreen> {
- 
-  
   final String _cloudName = "dqjqkwwwh";
   final String _uploadPreset = "rider_profiles";
 
@@ -35,8 +33,6 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
 
       if (!mounted) return;
 
-      Navigator.of(context).popUntil((route) => route.isFirst);
-
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -46,6 +42,21 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
           backgroundColor: RiderProfileScreen.primary,
         ),
       );
+
+      // popUntil((route) => route.isFirst) only pops back to whatever
+      // route happened to be first in this Navigator's stack — it does
+      // NOT guarantee landing on Role Selection, and it can resolve to a
+      // nested Navigator (e.g. inside a bottom-nav bar) instead of the
+      // app's root one. That's why the rider stayed "logged in" visually
+      // until the app was fully closed and reopened.
+      // Using the root navigator + pushNamedAndRemoveUntil('/', ...)
+      // guarantees we land on the app's actual entry route (Role
+      // Selection) and clears every screen — including RiderHomeScreen —
+      // out of memory, same as the customer logout flow already does.
+      Navigator.of(
+        context,
+        rootNavigator: true,
+      ).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -193,10 +204,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                       enabled: false,
                       decoration: InputDecoration(
                         labelText: 'Email Address (Fixed)',
-                        prefixIcon: const Icon(
-                          Icons.email,
-                          color: Colors.grey,
-                        ),
+                        prefixIcon: const Icon(Icons.email, color: Colors.grey),
                         border: const OutlineInputBorder(),
                         filled: true,
                         fillColor: Colors.grey.shade200,
@@ -210,10 +218,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                       enabled: false,
                       decoration: InputDecoration(
                         labelText: 'CNIC (Fixed)',
-                        prefixIcon: const Icon(
-                          Icons.badge,
-                          color: Colors.grey,
-                        ),
+                        prefixIcon: const Icon(Icons.badge, color: Colors.grey),
                         border: const OutlineInputBorder(),
                         filled: true,
                         fillColor: Colors.grey.shade200,
@@ -244,9 +249,9 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                                 .collection('users')
                                 .doc(widget.riderId)
                                 .update({
-                              'name': nameController.text.trim(),
-                              'phone': phoneController.text.trim(),
-                            });
+                                  'name': nameController.text.trim(),
+                                  'phone': phoneController.text.trim(),
+                                });
 
                             if (mounted) {
                               Navigator.pop(context);

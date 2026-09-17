@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -169,19 +170,25 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
           .where((n) => n.isNotEmpty)
           .toList();
 
-      final docRef = await FirebaseFirestore.instance.collection('carts').add({
-        'userId': userId,
-        'branchId': widget.selectedBranchId,
-        'name': '${widget.item.name} ($selectedSize)',
-        'price': price,
-        'quantity': quantity,
-        'imageUrl': widget.item.imageUrl,
-        'category': widget.item.category,
-        'selectedSize': selectedSize,
-        'toppings': toppingNames,
-        'isSmartCombo': false,
-        'addedAt': FieldValue.serverTimestamp(),
-      });
+      final docRef = await FirebaseFirestore.instance
+          .collection('carts')
+          .add({
+            'userId': userId,
+            'branchId': widget.selectedBranchId,
+            'name': '${widget.item.name} ($selectedSize)',
+            'price': price,
+            'quantity': quantity,
+            'imageUrl': widget.item.imageUrl,
+            'category': widget.item.category,
+            'selectedSize': selectedSize,
+            'toppings': toppingNames,
+            'isSmartCombo': false,
+            'addedAt': FieldValue.serverTimestamp(),
+          })
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw TimeoutException('Add to cart timed out'),
+          );
 
       debugPrint('Successfully written to Firestore. Doc ID: ${docRef.id}');
 
@@ -199,6 +206,20 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
           ),
         );
         Navigator.pop(context);
+      }
+    } on TimeoutException catch (_) {
+      // Firestore's offline queue would otherwise keep this write pending
+      // silently forever when there's no/slow internet, leaving the button
+      // stuck on its loading spinner with no feedback to the customer.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Please check your internet connection and try again.',
+            ),
+            backgroundColor: primary,
+          ),
+        );
       }
     } catch (e, stack) {
       debugPrint('Add to cart FAILED: $e');
@@ -705,7 +726,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             border: Border.symmetric(
-              horizontal: BorderSide(color: primary.withOpacity(0.4)),
+              horizontal: BorderSide(color: primary.withValues(alpha: 0.4)),
             ),
           ),
           child: Text(
@@ -730,7 +751,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: primary.withOpacity(0.4)),
+          border: Border.all(color: primary.withValues(alpha: 0.4)),
         ),
         child: Text(
           label,

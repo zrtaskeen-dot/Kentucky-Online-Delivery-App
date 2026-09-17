@@ -35,6 +35,9 @@ class RiderController extends ChangeNotifier {
         }
         body = '$riderName has accepted your order and will pick it up soon.';
         break;
+      case 'Delivery Started':
+        body = 'Your rider has started heading your way.';
+        break;
       case 'Picked Up':
         body = 'Your order has been picked up and is on its way.';
         break;
@@ -78,7 +81,7 @@ class RiderController extends ChangeNotifier {
     return FirebaseFirestore.instance
         .collection('orders')
         .where('riderId', isEqualTo: riderId)
-        .where('order_status', whereIn: ['Accepted', 'On The Way'])
+        .where('order_status', whereIn: ['Accepted', 'Delivery Started', 'Picked Up', 'On the Way'])
         .snapshots();
   }
 
@@ -162,11 +165,21 @@ class RiderController extends ChangeNotifier {
       final customerId =
           (orderData?['customerId'] ?? orderData?['userId'] ?? '').toString();
 
-      if (newStatus == 'Picked Up' && riderId.isNotEmpty) {
+      // One-active-delivery rule: a rider can have many orders sitting in
+      // "Accepted", but can only be actually OUT delivering one at a
+      // time. "Delivery Started" is the moment a delivery actually
+      // begins (rider tapped "Start Delivery"), so the check happens
+      // right there — not later at "Picked Up". Once a delivery has
+      // started, moving it on to "Picked Up" / "On the Way" / "Delivered"
+      // never hits this check again (it's the same delivery continuing).
+      if (newStatus == 'Delivery Started' && riderId.isNotEmpty) {
         final activeSnap = await FirebaseFirestore.instance
             .collection('orders')
             .where('riderId', isEqualTo: riderId)
-            .where('order_status', whereIn: ['Picked Up', 'On the Way'])
+            .where(
+              'order_status',
+              whereIn: ['Delivery Started', 'Picked Up', 'On the Way'],
+            )
             .get();
         final hasOtherActiveDelivery =
             activeSnap.docs.any((d) => d.id != orderId);
@@ -185,10 +198,16 @@ class RiderController extends ChangeNotifier {
         'statusUpdatedAt': FieldValue.serverTimestamp(),
       });
 
-      await _notifyCustomerOfStatus(customerId: customerId, status: newStatus);
+      // Fire-and-forget: notifying the customer (and whatever network
+      // call that involves) should never hold up the rider's own
+      // confirmation. Awaiting this before returning was what caused a
+      // noticeable delay before the "Order marked as ..." message
+      // appeared on screen.
+      _notifyCustomerOfStatus(customerId: customerId, status: newStatus)
+          .catchError((e) => debugPrint('Error notifying customer: $e'));
 
       if (newStatus == 'Picked Up') {
-        // Delivery has actually started now — begin GPS tracking.
+        // Rider has the food in hand now — begin GPS tracking.
         startLiveLocationTracking(orderId);
       } else if (newStatus == 'Delivered') {
         stopLiveLocationTracking();

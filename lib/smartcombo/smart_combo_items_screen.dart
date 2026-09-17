@@ -22,8 +22,8 @@ class SmartComboItemsScreen extends StatefulWidget {
 
 class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
   // ── Theme Colors (Maroon — matches app) ─────────────────────────
-  static const Color primary = Color(0xFFB12C00);
-  static const Color bgColor = Color(0xFFFFFDF3);
+  static const Color primary = Color(0xFFA70000);
+  static const Color bgColor = Color(0xFFFCF8DD);
   static const Color lightMaroon = Color(0xFFFFF3F1);
 
   double dealDiscountPercentage = 0.0;
@@ -279,7 +279,6 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
@@ -494,7 +493,6 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    
                     "No items available under Rs. $maxBudget",
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -549,7 +547,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: primary.withOpacity(0.12)),
+                    border: Border.all(color: primary.withValues(alpha: 0.12)),
                     boxShadow: const [
                       BoxShadow(
                         color: Color.fromRGBO(0, 0, 0, 0.05),
@@ -880,7 +878,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                                 calculateHypotheticalFinalPrice(currentPrice);
                             if (projectedFinalPrice > maxBudget) {
                               Navigator.pop(context);
-                             
+
                               _showThemedSnack(
                                 "This exceeds your selected budget.",
                               );

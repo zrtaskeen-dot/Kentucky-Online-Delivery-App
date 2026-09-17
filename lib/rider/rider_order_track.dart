@@ -89,7 +89,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     canvas.drawCircle(
       center,
       size / 2,
-      Paint()..color = Colors.blue.withOpacity(0.25),
+      Paint()..color = Colors.blue.withValues(alpha: 0.25),
     );
     // White border ring
     canvas.drawCircle(center, size / 3.2, Paint()..color = Colors.white);
@@ -353,8 +353,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           // 👈 Light shade of the same color when not yet reachable,
           // full solid color once it's active or already done — no
           // separate green "done" tint, as requested.
-          backgroundColor: isReachable ? color : color.withOpacity(0.35),
-          disabledBackgroundColor: isReachable ? color : color.withOpacity(0.35),
+          backgroundColor: isReachable ? color : color.withValues(alpha: 0.35),
+          disabledBackgroundColor: isReachable ? color : color.withValues(alpha: 0.35),
           padding: const EdgeInsets.symmetric(vertical: 16),
           elevation: isActive ? 3 : 0,
           shape: RoundedRectangleBorder(

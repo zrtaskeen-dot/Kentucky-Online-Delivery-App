@@ -289,7 +289,7 @@ class _OfferSliderState extends State<OfferSlider> {
                                   decoration: BoxDecoration(
                                     border: Border.symmetric(
                                       horizontal: BorderSide(
-                                        color: primary.withOpacity(0.4),
+                                        color: primary.withValues(alpha: 0.4),
                                       ),
                                     ),
                                   ),
@@ -374,7 +374,7 @@ class _OfferSliderState extends State<OfferSlider> {
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: primary.withOpacity(0.4)),
+          border: Border.all(color: primary.withValues(alpha: 0.4)),
         ),
         child: Text(
           label,
@@ -466,7 +466,7 @@ class _OfferSliderState extends State<OfferSlider> {
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
                             BoxShadow(
-                              color: accent.withOpacity(0.3),
+                              color: accent.withValues(alpha: 0.3),
                               blurRadius: 6,
                               offset: const Offset(3, 3),
                             ),
@@ -563,7 +563,7 @@ class _OfferSliderState extends State<OfferSlider> {
   Widget _placeholderImage() {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
+        color: Colors.white.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(12),
       ),
       alignment: Alignment.center,

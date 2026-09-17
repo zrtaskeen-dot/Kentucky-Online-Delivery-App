@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -77,7 +78,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   }
 
   Map<String, dynamic> get pricesMap =>
-      (widget.item.prices is Map && (widget.item.prices as Map).isNotEmpty)
+      ((widget.item.prices as Map).isNotEmpty)
       ? Map<String, dynamic>.from(widget.item.prices as Map)
       : {};
 
@@ -176,21 +177,27 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
           .where((n) => n.isNotEmpty)
           .toList();
 
-      await FirebaseFirestore.instance.collection('carts').add({
-        'userId': userId,
-        'branchId': widget.selectedBranchId,
-        'name': hasSizes && selectedSize.isNotEmpty
-            ? '${widget.item.name} (${_formatSizeLabel(selectedSize)})'
-            : widget.item.name,
-        'price': price,
-        'quantity': quantity,
-        'imageUrl': widget.item.imageUrl,
-        'category': widget.item.category,
-        'selectedSize': hasSizes ? selectedSize : 'regular',
-        'toppings': toppingNames,
-        'isSmartCombo': false,
-        'addedAt': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance
+          .collection('carts')
+          .add({
+            'userId': userId,
+            'branchId': widget.selectedBranchId,
+            'name': hasSizes && selectedSize.isNotEmpty
+                ? '${widget.item.name} (${_formatSizeLabel(selectedSize)})'
+                : widget.item.name,
+            'price': price,
+            'quantity': quantity,
+            'imageUrl': widget.item.imageUrl,
+            'category': widget.item.category,
+            'selectedSize': hasSizes ? selectedSize : 'regular',
+            'toppings': toppingNames,
+            'isSmartCombo': false,
+            'addedAt': FieldValue.serverTimestamp(),
+          })
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () => throw TimeoutException('Add to cart timed out'),
+          );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -210,6 +217,20 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
           ),
         );
         Navigator.pop(context);
+      }
+    } on TimeoutException catch (_) {
+      // Firestore's offline queue would otherwise keep this write pending
+      // silently forever when there's no/slow internet, leaving the button
+      // stuck on its loading spinner with no feedback to the customer.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please check your internet connection and try again.',
+            ),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     } catch (e, stack) {
       debugPrint('❌ Add to cart failed: $e');
@@ -617,7 +638,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             border: Border.symmetric(
-              horizontal: BorderSide(color: primary.withOpacity(0.4)),
+              horizontal: BorderSide(color: primary.withValues(alpha: 0.4)),
             ),
           ),
           child: Text(
@@ -642,7 +663,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: primary.withOpacity(0.4)),
+          border: Border.all(color: primary.withValues(alpha: 0.4)),
         ),
         child: Text(
           label,

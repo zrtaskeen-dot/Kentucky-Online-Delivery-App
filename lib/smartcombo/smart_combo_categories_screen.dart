@@ -36,7 +36,7 @@ class _SmartComboCategoriesScreenState
         width: double.infinity,
         height: double.infinity,
         decoration: const BoxDecoration(
-          color: Color(0xFFD32F2F),
+          color: Color(0xFFA70000),
           image: DecorationImage(
             image: AssetImage("assets/red_texture.png"),
             fit: BoxFit.cover,
@@ -190,11 +190,11 @@ class _SmartComboCategoriesScreenState
                                       height: 160,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: Colors.white.withOpacity(0.15),
+                                        color: Colors.white.withValues(alpha: 0.15),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: Colors.black.withOpacity(
-                                              0.2,
+                                            color: Colors.black.withValues(
+                                              alpha: 0.2,
                                             ),
                                             spreadRadius: 1,
                                             blurRadius: 10,
@@ -300,7 +300,7 @@ class _SmartComboCategoriesScreenState
                   child: Text(
                     '$itemCount',
                     style: const TextStyle(
-                      color: Color(0xFFD32F2F),
+                      color: Color(0xFFA70000),
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                     ),

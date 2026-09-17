@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class RiderAuthRepository {
@@ -23,7 +24,7 @@ class RiderAuthRepository {
           .doc(uid)
           .get(const GetOptions(source: Source.serverAndCache));
     } catch (e) {
-      print("Repository Error: $e");
+      debugPrint("Repository Error: $e");
       rethrow;
     }
   }
@@ -46,7 +47,7 @@ class RiderAuthRepository {
         });
       }
     } catch (e) {
-      print("Repository Google Save Error: $e");
+      debugPrint("Repository Google Save Error: $e");
       rethrow;
     }
   }
@@ -59,7 +60,32 @@ class RiderAuthRepository {
     String? branchId,
   }) async {
     try {
-      await _firestore.collection('users').doc(uid).set({
+      final userRef = _firestore.collection('users').doc(uid);
+
+      // Guard against silently clobbering an existing account. This used
+      // to be an unconditional .set() with no merge and no existence
+      // check, so if `uid` ever matched an account that already existed
+      // under a different role (e.g. a customer account reused for rider
+      // testing), this call would fully replace that document — wiping
+      // the customer's own name/email and replacing them with the
+      // rider's. That single shared "users/{uid}" doc is exactly why a
+      // customer's name can end up showing as the rider's name (and vice
+      // versa) even after restarting the app. Rider accounts should use
+      // their own dedicated uid, never a uid already in use for another
+      // role.
+      final existing = await userRef.get();
+      if (existing.exists) {
+        final existingRole = existing.data()?['role'];
+        if (existingRole != null && existingRole != 'rider') {
+          throw Exception(
+            'uid "$uid" already belongs to a different role '
+            '("$existingRole") — refusing to overwrite it with rider '
+            'data. Create the rider under a separate account/uid.',
+          );
+        }
+      }
+
+      await userRef.set({
         'name': name,
         'phone': phone,
         'email': email ?? '',
@@ -72,9 +98,9 @@ class RiderAuthRepository {
         'pending': 0,
         'statusUpdatedAt': FieldValue.serverTimestamp(),
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
     } catch (e) {
-      print("saveRiderData Error: $e");
+      debugPrint("saveRiderData Error: $e");
       rethrow;
     }
   }
@@ -92,11 +118,11 @@ class RiderAuthRepository {
 
         if (updates.isNotEmpty) {
           await _firestore.collection('users').doc(uid).update(updates);
-          print("✅ Missing fields added for rider: $uid");
+          debugPrint("✅ Missing fields added for rider: $uid");
         }
       }
     } catch (e) {
-      print("ensureRiderFields Error: $e");
+      debugPrint("ensureRiderFields Error: $e");
     }
   }
 
@@ -111,7 +137,7 @@ class RiderAuthRepository {
         'statusUpdatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print("updateRiderStatus Error: $e");
+      debugPrint("updateRiderStatus Error: $e");
       rethrow;
     }
   }
@@ -130,7 +156,7 @@ class RiderAuthRepository {
         'locationUpdatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print("updateOrderLocation Error: $e");
+      debugPrint("updateOrderLocation Error: $e");
     }
   }
 
@@ -146,7 +172,7 @@ class RiderAuthRepository {
         fieldKey: value,
       }, SetOptions(merge: true));
     } catch (e) {
-      print("updateRiderProfileField Error: $e");
+      debugPrint("updateRiderProfileField Error: $e");
       rethrow;
     }
   }
@@ -183,7 +209,7 @@ class RiderAuthRepository {
         throw Exception('No logged in user found.');
       }
     } on FirebaseAuthException catch (e) {
-      print("updateRiderEmail Auth Error: ${e.code}");
+      debugPrint("updateRiderEmail Auth Error: ${e.code}");
       if (e.code == 'wrong-password') {
         throw Exception('Aap ka enter kiya hua password ghalat hai.');
       } else if (e.code == 'email-already-in-use') {
@@ -198,7 +224,7 @@ class RiderAuthRepository {
         throw Exception(e.message ?? 'Auth Error');
       }
     } catch (e) {
-      print("updateRiderEmail Error: $e");
+      debugPrint("updateRiderEmail Error: $e");
       rethrow;
     }
   }
@@ -229,7 +255,7 @@ class RiderAuthRepository {
         );
       }
     } catch (e) {
-      print("uploadRiderPhoto Error: $e");
+      debugPrint("uploadRiderPhoto Error: $e");
       rethrow;
     }
   }
@@ -243,7 +269,7 @@ class RiderAuthRepository {
         throw Exception('No logged in user found.');
       }
     } on FirebaseAuthException catch (e) {
-      print("updateRiderPassword Auth Error: ${e.message}");
+      debugPrint("updateRiderPassword Auth Error: ${e.message}");
       if (e.code == 'requires-recent-login') {
         throw Exception(
           'Please re-authenticate before updating your password.',
@@ -251,7 +277,7 @@ class RiderAuthRepository {
       }
       rethrow;
     } catch (e) {
-      print("updateRiderPassword Error: $e");
+      debugPrint("updateRiderPassword Error: $e");
       rethrow;
     }
   }
@@ -282,7 +308,7 @@ class RiderAuthRepository {
         'acceptedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
-      print("acceptOrderInFirestore Error: $e");
+      debugPrint("acceptOrderInFirestore Error: $e");
       rethrow;
     }
   }

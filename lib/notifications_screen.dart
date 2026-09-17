@@ -14,6 +14,12 @@ class NotificationScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
 
+    // When this account was created — used to hide broadcast notifications
+    // (new menu items/deals) that went out before this customer even
+    // registered. Their personal, order-specific notifications are never
+    // affected by this, since those can't exist before the account does.
+    final accountCreatedAt = currentUser?.metadata.creationTime;
+
     return Scaffold(
       backgroundColor: const Color(
         0xFFFEF9E7,
@@ -84,7 +90,24 @@ class NotificationScreen extends StatelessWidget {
                   final hiddenFor = List<String>.from(
                     data['hiddenFor'] ?? const [],
                   );
-                  return !hiddenFor.contains(currentUser.uid);
+                  if (hiddenFor.contains(currentUser.uid)) return false;
+
+                  // New users shouldn't see store-wide broadcasts (new
+                  // menu items / deals) that were sent before they even
+                  // created their account — only ones sent from that
+                  // point onward. If we don't know the account creation
+                  // time for some reason, fail open (show it) rather than
+                  // hiding a legitimate notification.
+                  final notifUserId = data['userId'];
+                  if (notifUserId == 'ALL' && accountCreatedAt != null) {
+                    final ts = data['timestamp'];
+                    if (ts is Timestamp &&
+                        ts.toDate().isBefore(accountCreatedAt)) {
+                      return false;
+                    }
+                  }
+
+                  return true;
                 }).toList();
 
                 if (docs.isEmpty) {
@@ -109,6 +132,9 @@ class NotificationScreen extends StatelessWidget {
                     final isRead = data['isRead'] ?? false;
                     final notifUserId = data['userId'];
                     final isBroadcast = notifUserId == 'ALL';
+                    final timestampLabel = _formatPakistaniTimestamp(
+                      data['timestamp'],
+                    );
 
                     return Dismissible(
                       key: ValueKey(doc.id),
@@ -123,7 +149,7 @@ class NotificationScreen extends StatelessWidget {
                         ),
                         child: const Icon(Icons.delete, color: Colors.white),
                       ),
-                      
+
                       confirmDismiss: (_) => _showThemedConfirm(
                         context,
                         title: 'Delete notification?',
@@ -147,7 +173,7 @@ class NotificationScreen extends StatelessWidget {
                           leading: CircleAvatar(
                             backgroundColor: isRead
                                 ? Colors.grey.shade300
-                                : primaryColor.withOpacity(0.15),
+                                : primaryColor.withValues(alpha: 0.15),
                             child: Icon(
                               Icons.notifications_rounded,
                               color: isRead ? Colors.grey : primaryColor,
@@ -191,14 +217,30 @@ class NotificationScreen extends StatelessWidget {
                                 ),
                             ],
                           ),
-                          subtitle: Text(
-                            body,
-                            style: TextStyle(color: Colors.grey[600]),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                body,
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
+                              if (timestampLabel.isNotEmpty) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  timestampLabel,
+                                  style: TextStyle(
+                                    color: Colors.grey[500],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                           trailing: IconButton(
                             icon: Icon(
                               Icons.delete_outline_rounded,
-                              color: primaryColor.withOpacity(0.7),
+                              color: primaryColor.withValues(alpha: 0.7),
                             ),
                             tooltip: 'Delete',
                             onPressed: () => _confirmDeleteOne(
@@ -230,6 +272,27 @@ class NotificationScreen extends StatelessWidget {
   // The Firestore document itself is never removed.
 
   static const _cardWhite = Color(0xFFFFFFF0);
+
+  // Pakistani-style date/time: DD/MM/YYYY (day before month, not the
+  // US MM/DD/YYYY order) with a 12-hour clock + AM/PM, e.g.
+  // "15/09/2026, 4:45 PM". Firestore's serverTimestamp() is stored in
+  // UTC internally — .toDate().toLocal() converts it to the device's
+  // local time before formatting.
+  String _formatPakistaniTimestamp(dynamic raw) {
+    if (raw is! Timestamp) return '';
+    final dt = raw.toDate().toLocal();
+
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year.toString();
+
+    int hour12 = dt.hour % 12;
+    if (hour12 == 0) hour12 = 12;
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+
+    return '$day/$month/$year, $hour12:$minute $period';
+  }
 
   // Shared app-themed confirmation dialog. Returns true only if the
   // person tapped the destructive action.
@@ -299,8 +362,7 @@ class NotificationScreen extends StatelessWidget {
     final confirmed = await _showThemedConfirm(
       context,
       title: 'Delete all notifications?',
-      message:
-          'Do you want to delete all notifications?',
+      message: 'Do you want to delete all notifications?',
       confirmLabel: 'Delete all',
     );
     if (confirmed) {

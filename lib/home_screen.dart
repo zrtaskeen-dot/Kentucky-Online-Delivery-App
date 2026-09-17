@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // 👈 FCM Token import
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'cart_provider.dart';
@@ -9,7 +9,7 @@ import 'cart_screen.dart';
 import 'food_detail_screen.dart';
 import 'pizza_detail.dart';
 import 'models/food_item.dart';
-import 'package:animation/widgets/offer_slider.dart';
+import '/widgets/offer_slider.dart';
 import 'package:animation/smartcombo/smart_combo_price_screen.dart';
 import 'order_tracker.dart';
 
@@ -21,11 +21,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Orange theme to match the app dashboard
-  static const primary = Color(0xFFE65100);
-  static const primaryLight = Color(0xFFFFF3E0);
-  static const bgColor = Color(0xFFFEF9E7); // warm cream
-  static const cardWhite = Color(0xFFFFFFF0);
+  // Brand theme colors — matches the bottom nav bar (maroon + orange + white)
+  static const primary = Color(0xFFFF8A00); // Brand Orange
+  static const maroon = Color(0xFFA70000); // Brand Maroon
+  static const bgColor = Colors.white; // 👈 Pure white page background
+  static const itemCardColor = Color(
+    0xFFFFFDFA,
+  ); // 👈 Very light, near-white cards (matches reference look)
+  static const lightMaroonBorder = Color(
+    0x33A70000,
+  ); // 👈 Very light subtle maroon outline (~20% opacity)
 
   int selectedCategoryIndex = 0;
   List<FoodItem> allItems = [];
@@ -41,7 +46,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String userName = 'there';
 
-  // ---- state for pending feedback popup ----
   bool _isFeedbackDialogShown = false;
   StreamSubscription<QuerySnapshot>? _pendingFeedbackSub;
   StreamSubscription<DocumentSnapshot>? _userDocSub;
@@ -70,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _listenForUserName();
     _listenForPendingFeedback();
     _searchController.addListener(_onSearchChanged);
-    _generateAndSaveFcmToken(); // 👈 App kholte hi FCM Token save karne ke liye
+    _generateAndSaveFcmToken();
   }
 
   @override
@@ -82,7 +86,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // ---- FCM Token Generation & Save Function ----
   Future<void> _generateAndSaveFcmToken() async {
     try {
       FirebaseMessaging messaging = FirebaseMessaging.instance;
@@ -110,7 +113,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ---- Checks for any delivered order with feedback pending ----
   void _listenForPendingFeedback() {
     _pendingFeedbackSub = FirebaseFirestore.instance
         .collection('orders')
@@ -137,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen> {
         });
   }
 
-  // ---- Search now matches ONLY the item name ----
   void _onSearchChanged() {
     final query = _searchController.text.trim().toLowerCase();
     setState(() {
@@ -160,7 +161,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return raw.toUpperCase().trim().replaceAll(RegExp(r'[^A-Z0-9]'), '');
   }
 
-  // ✅ An item counts as "new" if it was added within the last 7 days.
   bool _isNewItem(FoodItem item) {
     if (item.createdAt == null) return false;
     return DateTime.now().difference(item.createdAt!) <=
@@ -285,8 +285,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() {
         allItems = snapshot.docs.map((d) => FoodItem.fromFirestore(d)).toList();
-        // ✅ Newest items (by createdAt) show up first everywhere —
-        // "Our Menu", inside each category tab, and in search results.
         allItems.sort((a, b) {
           if (a.createdAt == null && b.createdAt == null) return 0;
           if (a.createdAt == null) return 1;
@@ -438,7 +436,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildHeader(String? safeDropdownValue) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      decoration: const BoxDecoration(color: bgColor),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -468,7 +465,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
-                    color: Colors.black87,
+                    color: maroon,
                   ),
                 ),
               ],
@@ -504,11 +501,15 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: lightMaroonBorder,
+            width: 1,
+          ), // Very light maroon border
           boxShadow: const [
             BoxShadow(
-              color: Color.fromRGBO(0, 0, 0, 0.06),
-              blurRadius: 10,
-              offset: Offset(0, 3),
+              color: Color.fromRGBO(0, 0, 0, 0.03),
+              blurRadius: 6,
+              offset: Offset(0, 2),
             ),
           ],
         ),
@@ -517,7 +518,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: primary.withOpacity(0.12),
+                color: primary.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
@@ -546,7 +547,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 2),
                   Text(
                     selectedBranchAddress,
-                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[600]),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -560,9 +561,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ✅ Clean, modern branch picker — replaces the old native dropdown.
-  // Each branch gets its own clearly separated, tappable row instead of a
-  // cramped popup menu.
   void _openBranchSelector(String? safeDropdownValue) {
     showModalBottomSheet(
       context: context,
@@ -641,13 +639,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             decoration: BoxDecoration(
                               color: isSelected
                                   ? primary.withOpacity(0.08)
-                                  : cardWhite,
+                                  : itemCardColor,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: isSelected
-                                    ? primary
-                                    : const Color(0xFFEFEFEF),
-                                width: isSelected ? 1.4 : 1,
+                                color: isSelected ? primary : lightMaroonBorder,
+                                width: isSelected ? 1.5 : 1,
                               ),
                             ),
                             child: Row(
@@ -689,7 +685,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         address,
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: Colors.grey[500],
+                                          color: Colors.grey[600],
                                         ),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
@@ -735,13 +731,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: itemCardColor,
             borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: lightMaroonBorder,
+              width: 1,
+            ), // Light maroon border
             boxShadow: const [
               BoxShadow(
-                color: Color.fromRGBO(0, 0, 0, 0.06),
-                blurRadius: 10,
-                offset: Offset(0, 3),
+                color: Color.fromRGBO(0, 0, 0, 0.03),
+                blurRadius: 6,
+                offset: Offset(0, 2),
               ),
             ],
           ),
@@ -796,11 +796,15 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: lightMaroonBorder,
+          width: 1,
+        ), // Light maroon border
         boxShadow: const [
           BoxShadow(
-            color: Color.fromRGBO(0, 0, 0, 0.07),
-            blurRadius: 12,
-            offset: Offset(0, 4),
+            color: Color.fromRGBO(0, 0, 0, 0.03),
+            blurRadius: 6,
+            offset: Offset(0, 2),
           ),
         ],
       ),
@@ -872,20 +876,33 @@ class _HomeScreenState extends State<HomeScreen> {
               margin: const EdgeInsets.only(right: 10),
               padding: const EdgeInsets.symmetric(horizontal: 14),
               decoration: BoxDecoration(
-                color: isSelected ? primary : Colors.white,
+                gradient: isSelected
+                    ? const LinearGradient(
+                        colors: [primary, maroon],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: isSelected ? null : Colors.white,
                 borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: isSelected
+                      ? Colors.transparent
+                      : lightMaroonBorder, // Light maroon border for unselected
+                  width: 1,
+                ),
                 boxShadow: isSelected
                     ? [
                         BoxShadow(
-                          color: primary.withAlpha(80),
+                          color: maroon.withOpacity(0.35),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
                       ]
                     : [
                         const BoxShadow(
-                          color: Color.fromRGBO(0, 0, 0, 0.06),
-                          blurRadius: 6,
+                          color: Color.fromRGBO(0, 0, 0, 0.03),
+                          blurRadius: 4,
                         ),
                       ],
               ),
@@ -893,9 +910,9 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Text(
                 name,
                 style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.black87,
+                  color: isSelected ? Colors.white : maroon,
                   fontSize: 12,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
                 ),
               ),
             ),
@@ -932,13 +949,18 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: cardWhite,
+          color: itemCardColor,
           borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color:
+                lightMaroonBorder, // Light maroon border for food card distinction
+            width: 1,
+          ),
           boxShadow: const [
             BoxShadow(
-              color: Color.fromRGBO(0, 0, 0, 0.06),
-              blurRadius: 10,
-              offset: Offset(0, 4),
+              color: Color.fromRGBO(0, 0, 0, 0.04),
+              blurRadius: 8,
+              offset: Offset(0, 3),
             ),
           ],
         ),
@@ -951,11 +973,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   flex: 5,
                   child: ClipRRect(
                     borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(20),
+                      top: Radius.circular(19),
                     ),
                     child: item.imageUrl.isEmpty
                         ? Container(
-                            color: primaryLight,
+                            color: Colors.orange.shade50,
                             child: const Icon(
                               Icons.fastfood_rounded,
                               size: 50,
@@ -967,7 +989,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             width: double.infinity,
                             fit: BoxFit.cover,
                             errorBuilder: (_, __, ___) => Container(
-                              color: primaryLight,
+                              color: Colors.orange.shade50,
                               child: const Icon(
                                 Icons.fastfood_rounded,
                                 size: 50,
@@ -999,7 +1021,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           item.description,
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey[500],
+                            color: Colors.grey[600],
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -1023,7 +1045,11 @@ class _HomeScreenState extends State<HomeScreen> {
                               width: 28,
                               height: 28,
                               decoration: const BoxDecoration(
-                                color: primary,
+                                gradient: LinearGradient(
+                                  colors: [primary, maroon],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
                                 shape: BoxShape.circle,
                               ),
                               child: const Icon(
@@ -1050,11 +1076,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: primary,
+                    color: maroon,
                     borderRadius: BorderRadius.circular(8),
                     boxShadow: [
                       BoxShadow(
-                        color: primary.withAlpha(90),
+                        color: maroon.withOpacity(0.3),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),
@@ -1143,7 +1169,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   'Try a different search term',
-                  style: TextStyle(color: Colors.grey[400], fontSize: 13),
+                  style: TextStyle(color: Colors.grey[500], fontSize: 13),
                 ),
               ),
           ],
