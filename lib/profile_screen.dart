@@ -14,9 +14,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const bgColor = Color(0xFFFEF9E7);
-  static const primary = Color(0xFFA62600); // Maroon Color
-  static const cardColor = Color(0xFFFFFFF0);
+  static const bgColor = Colors.white;
+  static const primary = Color(0xFFA70000); // Maroon Color
+  static const cardColor = Color(0xFFFFFDFA);
 
   // Cloudinary credentials
   static const String _cloudinaryUrl =
@@ -660,8 +660,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 class _TermsAndConditionsScreen extends StatelessWidget {
   const _TermsAndConditionsScreen();
 
-  static const primary = Color(0xFFA62600);
-  static const bgColor = Color(0xFFFEF9E7);
+  static const primary = Color(0xFFA70000);
+  static const bgColor = Colors.white;
 
   @override
   Widget build(BuildContext context) {

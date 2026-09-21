@@ -19,10 +19,12 @@ class PizzaDetailScreen extends StatefulWidget {
 }
 
 class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
-  static const primary = Color(0xFFB12C00); // Maroon theme (matches app)
-  static const bgColor = Color(0xFFFFFDF3);
+  // App Theme Colors (matches the rest of the app's maroon brand palette)
+  static const Color themeColor = Color(0xFFA70000); // Main Maroon Accent
+  static const Color bgColor = Colors.white; // Matches cardColor/bottom bar
+  static const Color lightMaroon = Color(0x33A70000);
+  static const Color cardColor = Color(0xFFFFFDFA);
 
-  // ── State ─────────────────────────────────────────────────────
   String selectedSize = '';
   int quantity = 1;
   bool isAddingToCart = false;
@@ -30,11 +32,9 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   Map<String, Map<String, dynamic>> toppingsData = {};
   bool loadingToppings = true;
 
-  // Matches CartScreen's fallback guest id.
   final String userId =
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
-  // ── Pizza size visual scale (circle sizing) ────────────────────
   static const Map<String, double> sizeVisualScale = {
     'small': 0.55,
     'Small': 0.55,
@@ -53,8 +53,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   Map<String, dynamic> get pricesMap =>
       Map<String, dynamic>.from(widget.item.prices as Map);
 
-  // Forces a proper Small → Medium → Large → XLarge display order
-  // regardless of how Firestore returns the map keys.
   static const List<String> _sizeSortOrder = [
     'small',
     'medium',
@@ -95,33 +93,14 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     return total;
   }
 
-  // Base unit price for one item (size + toppings, quantity NOT applied).
-  // This is what gets stored in Firestore's 'price' field, so the cart's
-  // quantity stepper doesn't multiply an already-multiplied price.
   int get unitPrice => basePrice + toppingsPrice;
-
   int get totalPrice => unitPrice * quantity;
 
-  // ─────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
-
-    debugPrint(
-      'PizzaDetailScreen opened for "${widget.item.name}" | '
-      'prices=${widget.item.prices} (type: ${widget.item.prices.runtimeType}) | '
-      'userId=$userId',
-    );
-
     if (pricesMap.isNotEmpty) {
-      selectedSize = sortedSizeKeys.first; // smallest size by proper order
-    } else {
-      debugPrint(
-        'pricesMap is EMPTY for "${widget.item.name}". '
-        'This item has no size options, so basePrice will always be 0 '
-        'unless you fix its Firestore "prices" field to be a Map like '
-        '{"small": 500, "large": 800}.',
-      );
+      selectedSize = sortedSizeKeys.first;
     }
     _fetchToppings();
   }
@@ -134,9 +113,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
           .get();
 
       setState(() {
-        toppingsData = {
-          for (var d in snap.docs) d.id: d.data(),
-        };
+        toppingsData = {for (var d in snap.docs) d.id: d.data()};
         loadingToppings = false;
       });
     } catch (e) {
@@ -150,27 +127,12 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     try {
       final int price = unitPrice;
 
-      debugPrint(
-        'Adding to cart -> name: ${widget.item.name}, '
-        'size: $selectedSize, basePrice: $basePrice, '
-        'toppingsPrice: $toppingsPrice, unitPrice: $price, '
-        'userId: $userId, branchId: ${widget.selectedBranchId}',
-      );
-
-      if (price <= 0) {
-        debugPrint(
-          'Warning: unitPrice is 0. Check that "${widget.item.name}" '
-          'has a valid "prices" Map field in Firestore with a matching '
-          'key for size "$selectedSize".',
-        );
-      }
-
       final toppingNames = selectedToppings
           .map((id) => toppingsData[id]?['name']?.toString() ?? '')
           .where((n) => n.isNotEmpty)
           .toList();
 
-      final docRef = await FirebaseFirestore.instance
+      await FirebaseFirestore.instance
           .collection('carts')
           .add({
             'userId': userId,
@@ -190,15 +152,11 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
             onTimeout: () => throw TimeoutException('Add to cart timed out'),
           );
 
-      debugPrint('Successfully written to Firestore. Doc ID: ${docRef.id}');
-
       if (mounted) {
-        // Success snackbar now uses the app's maroon theme color
-        // instead of green, so it matches the rest of the app.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('${widget.item.name} added to cart!'),
-            backgroundColor: primary,
+            backgroundColor: themeColor,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
@@ -208,16 +166,13 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         Navigator.pop(context);
       }
     } on TimeoutException catch (_) {
-      // Firestore's offline queue would otherwise keep this write pending
-      // silently forever when there's no/slow internet, leaving the button
-      // stuck on its loading spinner with no feedback to the customer.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
+          const SnackBar(
+            content: Text(
               'Please check your internet connection and try again.',
             ),
-            backgroundColor: primary,
+            backgroundColor: themeColor,
           ),
         );
       }
@@ -229,7 +184,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Something went wrong: $e'),
-            backgroundColor: primary,
+            backgroundColor: themeColor,
           ),
         );
       }
@@ -238,7 +193,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     }
   }
 
-  // ─────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -250,7 +204,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ── Pizza Image ──────────────────────────────────
                 _buildTopImage(),
 
                 Padding(
@@ -258,18 +211,16 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ── Title ──────────────────────────────────
                       Text(
                         widget.item.name,
                         style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.w900,
-                          color: Colors.black87,
+                          color: Colors.black,
                         ),
                       ),
                       const SizedBox(height: 6),
 
-                      // ── Description card ───────────────────────
                       if (widget.item.description.isNotEmpty)
                         _card(
                           title: 'Ingredients',
@@ -284,7 +235,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                         ),
                       const SizedBox(height: 14),
 
-                      // ── SIZE SELECTOR (fixed to single line) ────
                       if (pricesMap.isNotEmpty)
                         _card(
                           title: 'Select Size',
@@ -302,9 +252,8 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 22),
                                   child: GestureDetector(
-                                    onTap: () => setState(
-                                      () => selectedSize = sizeKey,
-                                    ),
+                                    onTap: () =>
+                                        setState(() => selectedSize = sizeKey),
                                     child: Column(
                                       children: [
                                         AnimatedContainer(
@@ -316,18 +265,18 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
                                             color: isSelected
-                                                ? primary.withAlpha(15)
-                                                : Colors.grey.shade100,
+                                                ? themeColor.withAlpha(20)
+                                                : lightMaroon,
                                             border: Border.all(
                                               color: isSelected
-                                                  ? primary
+                                                  ? themeColor
                                                   : Colors.grey.shade300,
                                               width: isSelected ? 2.5 : 1.5,
                                             ),
                                             boxShadow: isSelected
                                                 ? [
                                                     BoxShadow(
-                                                      color: primary
+                                                      color: themeColor
                                                           .withAlpha(50),
                                                       blurRadius: 8,
                                                       offset: const Offset(
@@ -351,10 +300,9 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                                           Icons
                                                               .local_pizza_rounded,
                                                           size:
-                                                              circleSize *
-                                                              0.52,
+                                                              circleSize * 0.52,
                                                           color: isSelected
-                                                              ? primary
+                                                              ? themeColor
                                                               : Colors
                                                                     .grey
                                                                     .shade400,
@@ -364,7 +312,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                                     Icons.local_pizza_rounded,
                                                     size: circleSize * 0.52,
                                                     color: isSelected
-                                                        ? primary
+                                                        ? themeColor
                                                         : Colors.grey.shade400,
                                                   ),
                                           ),
@@ -378,7 +326,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                                 ? FontWeight.w800
                                                 : FontWeight.w500,
                                             color: isSelected
-                                                ? primary
+                                                ? themeColor
                                                 : Colors.black54,
                                           ),
                                         ),
@@ -387,7 +335,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                           style: TextStyle(
                                             fontSize: 11,
                                             color: isSelected
-                                                ? primary
+                                                ? themeColor
                                                 : Colors.grey[500],
                                             fontWeight: isSelected
                                                 ? FontWeight.w700
@@ -403,7 +351,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                           ),
                         )
                       else
-                        // ── No size map -> show plain price instead ──
                         _card(
                           title: 'Price',
                           child: Text(
@@ -411,13 +358,12 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
-                              color: primary,
+                              color: themeColor,
                             ),
                           ),
                         ),
                       const SizedBox(height: 14),
 
-                      // ── Extra Toppings ────────────────────────
                       if (!loadingToppings && toppingsData.isNotEmpty)
                         _card(
                           title: 'Extra Topping',
@@ -442,13 +388,11 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                     vertical: 12,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: sel
-                                        ? const Color(0xFFFFF3F3)
-                                        : Colors.grey.shade50,
+                                    color: sel ? lightMaroon : cardColor,
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(
                                       color: sel
-                                          ? primary
+                                          ? themeColor
                                           : Colors.grey.shade200,
                                     ),
                                   ),
@@ -459,10 +403,10 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                         height: 20,
                                         decoration: BoxDecoration(
                                           shape: BoxShape.circle,
-                                          color: sel ? primary : Colors.white,
+                                          color: sel ? themeColor : cardColor,
                                           border: Border.all(
                                             color: sel
-                                                ? primary
+                                                ? themeColor
                                                 : Colors.grey.shade400,
                                             width: 1.5,
                                           ),
@@ -494,7 +438,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                           fontSize: 14,
                                           fontWeight: FontWeight.w700,
                                           color: sel
-                                              ? primary
+                                              ? themeColor
                                               : Colors.grey[600],
                                         ),
                                       ),
@@ -507,7 +451,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                         ),
                       const SizedBox(height: 14),
 
-                      // ── Quantity (rectangle box style, matches cart) ──
                       _card(title: 'Quantity', child: _buildQuantityRectBox()),
                     ],
                   ),
@@ -516,7 +459,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
             ),
           ),
 
-          // ── Sticky Add to Cart ─────────────────────────────────
           Positioned(
             bottom: 0,
             left: 0,
@@ -527,9 +469,9 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                 color: Colors.white,
                 boxShadow: [
                   BoxShadow(
-                    color: Color.fromRGBO(0, 0, 0, 0.1),
-                    blurRadius: 12,
-                    offset: Offset(0, -4),
+                    color: Colors.black12,
+                    blurRadius: 10,
+                    offset: Offset(0, -2),
                   ),
                 ],
               ),
@@ -548,7 +490,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w900,
-                          color: primary,
+                          color: themeColor,
                         ),
                       ),
                     ],
@@ -556,14 +498,14 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: SizedBox(
-                      height: 50,
+                      height: 48,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: primary,
+                          backgroundColor: themeColor,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 3,
+                          elevation: 0,
                         ),
                         onPressed: isAddingToCart ? null : _addToCart,
                         child: isAddingToCart
@@ -579,9 +521,8 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                 'ADD TO CART',
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.bold,
                                   color: Colors.white,
-                                  letterSpacing: 1,
                                 ),
                               ),
                       ),
@@ -596,14 +537,13 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     );
   }
 
-  // ── Top image with back button ────────────────────────────────
   Widget _buildTopImage() {
     return Stack(
       children: [
         Container(
           height: 280,
           width: double.infinity,
-          color: Colors.grey.shade100,
+          color: lightMaroon,
           child: widget.item.imageUrl.isNotEmpty
               ? Image.network(
                   widget.item.imageUrl,
@@ -612,7 +552,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                     child: Icon(
                       Icons.local_pizza_rounded,
                       size: 80,
-                      color: primary,
+                      color: themeColor,
                     ),
                   ),
                 )
@@ -620,11 +560,10 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                   child: Icon(
                     Icons.local_pizza_rounded,
                     size: 80,
-                    color: primary,
+                    color: themeColor,
                   ),
                 ),
         ),
-        // Back button
         SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(8),
@@ -633,19 +572,14 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
               child: Container(
                 width: 38,
                 height: 38,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color.fromRGBO(0, 0, 0, 0.15),
-                      blurRadius: 6,
-                    ),
-                  ],
+                  boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 6)],
                 ),
                 child: const Icon(
                   Icons.arrow_back_rounded,
-                  color: Colors.black87,
+                  color: Colors.black,
                   size: 20,
                 ),
               ),
@@ -656,7 +590,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────
   String _formatSizeLabel(String key) {
     switch (key.toLowerCase()) {
       case 'small':
@@ -684,14 +617,10 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
         boxShadow: const [
-          BoxShadow(
-            color: Color.fromRGBO(0, 0, 0, 0.05),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
       ),
       child: Column(
@@ -712,7 +641,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     );
   }
 
-  // ── Quantity control: rectangle box "- qty +" ──────────────────
   Widget _buildQuantityRectBox() {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -726,14 +654,14 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             border: Border.symmetric(
-              horizontal: BorderSide(color: primary.withValues(alpha: 0.4)),
+              horizontal: BorderSide(color: Colors.grey.shade300),
             ),
           ),
           child: Text(
             "$quantity",
             style: const TextStyle(
               color: Colors.black,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               fontSize: 16,
             ),
           ),
@@ -751,12 +679,12 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: primary.withValues(alpha: 0.4)),
+          border: Border.all(color: Colors.grey.shade300),
         ),
         child: Text(
           label,
           style: const TextStyle(
-            color: primary,
+            color: themeColor,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),

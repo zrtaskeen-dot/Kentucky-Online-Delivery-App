@@ -10,11 +10,12 @@ import 'login_screen.dart';
 class CartScreen extends StatelessWidget {
   const CartScreen({super.key});
 
-  static const Color themeColor = Color(0xFFB12C00);
-  static const Color bgColor = Color(0xFFFEF9E7);
+  static const Color primary = Color(0xFFB12C00);
+  static const bgColor = Colors.white;
   static const Color lightMaroon = Color(0xFFFFF3F1);
-  static const Color cardColor = Color(0xFFFFFFF0);
+  static const Color cardColor = Color(0xFFFFFDFA);
 
+  
   static const double _freeDeliveryThreshold = 500;
   static const double _deliveryFee = 50;
 
@@ -68,7 +69,7 @@ class CartScreen extends StatelessWidget {
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(color: themeColor),
+              child: CircularProgressIndicator(color: primary),
             );
           }
 
@@ -244,7 +245,7 @@ class CartScreen extends StatelessWidget {
                             style: const TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
-                              color: themeColor,
+                              color: primary,
                             ),
                           ),
                         ],
@@ -257,7 +258,7 @@ class CartScreen extends StatelessWidget {
                           builder: (context, cartProvider, child) {
                             return ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: themeColor,
+                                backgroundColor: primary,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12),
                                 ),
@@ -274,7 +275,7 @@ class CartScreen extends StatelessWidget {
                                       content: Text(
                                         "Please log in or sign up to proceed with your order.",
                                       ),
-                                      backgroundColor: themeColor,
+                                      backgroundColor: primary,
                                       duration: Duration(seconds: 3),
                                     ),
                                   );
@@ -361,7 +362,7 @@ class CartScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
+        border: Border.all(color: primary.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
@@ -383,7 +384,7 @@ class CartScreen extends StatelessWidget {
                       color: lightMaroon,
                       child: const Icon(
                         Icons.fastfood,
-                        color: themeColor,
+                        color: primary,
                         size: 30,
                       ),
                     ),
@@ -394,7 +395,7 @@ class CartScreen extends StatelessWidget {
                     color: lightMaroon,
                     child: const Icon(
                       Icons.fastfood,
-                      color: themeColor,
+                      color: primary,
                       size: 30,
                     ),
                   ),
@@ -425,7 +426,7 @@ class CartScreen extends StatelessWidget {
                     Text(
                       "Rs. $totalLinePrice",
                       style: const TextStyle(
-                        color: themeColor,
+                        color: primary,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
@@ -455,7 +456,7 @@ class CartScreen extends StatelessWidget {
                       child: const Text(
                         "REMOVE",
                         style: TextStyle(
-                          color: themeColor,
+                          color: primary,
                           fontWeight: FontWeight.bold,
                           fontSize: 12,
                           decoration: TextDecoration.underline,
@@ -496,7 +497,7 @@ class CartScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
+        border: Border.all(color: primary.withValues(alpha: 0.15)),
         boxShadow: const [
           BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
@@ -518,7 +519,7 @@ class CartScreen extends StatelessWidget {
                       color: lightMaroon,
                       child: const Icon(
                         Icons.auto_awesome,
-                        color: themeColor,
+                        color: primary,
                         size: 30,
                       ),
                     ),
@@ -529,7 +530,7 @@ class CartScreen extends StatelessWidget {
                     color: lightMaroon,
                     child: const Icon(
                       Icons.auto_awesome,
-                      color: themeColor,
+                      color: primary,
                       size: 30,
                     ),
                   ),
@@ -541,7 +542,7 @@ class CartScreen extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    const Icon(Icons.auto_awesome, color: themeColor, size: 14),
+                    const Icon(Icons.auto_awesome, color: primary, size: 14),
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
@@ -570,7 +571,7 @@ class CartScreen extends StatelessWidget {
                     Text(
                       "Rs. $totalLinePrice",
                       style: const TextStyle(
-                        color: themeColor,
+                        color: primary,
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
                       ),
@@ -600,7 +601,7 @@ class CartScreen extends StatelessWidget {
                       child: const Text(
                         "REMOVE",
                         style: TextStyle(
-                          color: themeColor,
+                          color: primary,
                           fontWeight: FontWeight.bold,
                           fontSize: 12,
                           decoration: TextDecoration.underline,
@@ -627,7 +628,7 @@ class CartScreen extends StatelessWidget {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             border: Border.symmetric(
-              horizontal: BorderSide(color: themeColor.withValues(alpha: 0.4)),
+              horizontal: BorderSide(color: primary.withValues(alpha: 0.4)),
             ),
           ),
           child: Text(
@@ -652,12 +653,12 @@ class CartScreen extends StatelessWidget {
         height: 32,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: themeColor.withValues(alpha: 0.4)),
+          border: Border.all(color: primary.withValues(alpha: 0.4)),
         ),
         child: Text(
           label,
           style: const TextStyle(
-            color: themeColor,
+            color: primary,
             fontWeight: FontWeight.bold,
             fontSize: 16,
           ),

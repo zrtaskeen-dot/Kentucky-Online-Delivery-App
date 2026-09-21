@@ -32,10 +32,11 @@ class _EarningEntry {
 class _RiderHomeScreenState extends State<RiderHomeScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
-  static const primary = Color(0xFFA30000); // Maroon - icons always this color
-  static const accentOrange = Color(0xFFFF9831); // Selected background circle
-  static const navBarBg = Color(0xFFFFFFF0); // bottom bar bg
-  static const bgColor = Color(0xFFFFFDF0);
+  // 👈 Matches Home screen's exact brand palette (maroon + orange + white)
+  static const primary = Color(0xFFA70000); // Maroon (same as Home) - icons always this color
+  static const accentOrange = Color(0xFFFF8A00); // Selected background circle (same as Home)
+  static const navBarBg = Color(0xFFFFFDFA); // bottom bar bg (same as Home's card tint)
+  static const bgColor = Colors.white; // (same as Home)
 
   // Earnings filter — a custom date range only. Null start/end means no
   // filter is applied (all delivered orders are counted).

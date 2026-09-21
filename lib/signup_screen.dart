@@ -8,6 +8,37 @@ import 'login_screen.dart';
 import 'main_navigation.dart';
 import 'fcm_service.dart'; // 👈 ADDED
 
+// Capitalizes the first letter of every word as the user types (e.g.
+// "ali khan" -> "Ali Khan"), and lower-cases the rest of that word.
+// Keeps the cursor exactly where it was.
+class CapitalizeWordsFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+
+    final buffer = StringBuffer();
+    bool capitalizeNext = true;
+
+    for (int i = 0; i < newValue.text.length; i++) {
+      final ch = newValue.text[i];
+      if (ch.trim().isEmpty) {
+        buffer.write(ch);
+        capitalizeNext = true;
+      } else if (capitalizeNext) {
+        buffer.write(ch.toUpperCase());
+        capitalizeNext = false;
+      } else {
+        buffer.write(ch.toLowerCase());
+      }
+    }
+
+    return newValue.copyWith(text: buffer.toString(), selection: newValue.selection);
+  }
+}
+
 class SignUpScreen extends StatefulWidget {
   final String role; // 'customer' or 'rider'
 
@@ -27,10 +58,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscurePassword = true;
 
   // ── Theme ──
-  static const Color bgColor = Color(0xFFFCF8DD);
+  static const Color bgColor = Colors.white;
   static const Color themeColor = Color(0xFFA70000);
-  static const Color creamColor = Color(0xFFFEF9E7);
-  static const Color fieldColor = Color(0xFFFFFFF0);
+  static const Color creamColor = Colors.white;
+  static const Color fieldColor = Color(0xFFFFFDFA);
 
   final Map<String, String> roleMap = {
     'customer': 'R001',
@@ -313,6 +344,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         controller: _nameController,
                         label: 'Full Name',
                         icon: Icons.person_outline,
+                        capitalizeWords: true,
                         validator: (v) =>
                             v!.isEmpty ? 'Enter your full name' : null,
                       ),
@@ -578,6 +610,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     bool obscureText = false,
     Widget? suffixIcon,
     String? Function(String?)? validator,
+    bool capitalizeWords = false,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -594,6 +627,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
         controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
+        textCapitalization: capitalizeWords
+            ? TextCapitalization.words
+            : TextCapitalization.none,
+        inputFormatters: capitalizeWords
+            ? [CapitalizeWordsFormatter()]
+            : null,
         style: const TextStyle(
           fontWeight: FontWeight.w500,
           color: Colors.black87,

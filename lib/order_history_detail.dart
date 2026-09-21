@@ -12,9 +12,8 @@ import 'receipt_upload_button.dart';
 // clock crosses the 1h30m cutoff wouldn't see the Cancel button
 // disappear until they closed and reopened the sheet.
 class _LiveTicker extends StatefulWidget {
-  const _LiveTicker({
-    required this.builder,
-  }) : interval = const Duration(seconds: 30);
+  const _LiveTicker({required this.builder})
+    : interval = const Duration(seconds: 30);
 
   final WidgetBuilder builder;
   final Duration interval;
@@ -111,10 +110,12 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   final String orderId;
   final Map<String, dynamic> data;
 
-  static const Color themeColor = Color(0xFFA70000);
-  static const Color bgColor = Color(0xFFFCF8DD);
-  static const Color cardColor = Color(0xFFFFFFF0);
-  static const Color lightMaroon = Color(0xFFFFF3F1);
+  // 👈 Matches HomeScreen's actual brand palette: white bg + orange/maroon
+  static const Color themeColor = Color(0xFFA70000); // Brand Maroon
+  static const Color accentOrange = Color(0xFFFF8A00); // Brand Orange
+  static const Color bgColor = Colors.white;
+  static const Color cardColor = Color(0xFFFFFDFA);
+  static const Color lightMaroon = Color(0x33A70000);
 
   static const List<String> _pastStatuses = ['delivered', 'cancelled'];
 
@@ -164,6 +165,21 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     if (riderId == null) return false;
     final s = riderId.toString().trim();
     return s.isNotEmpty && s.toLowerCase() != 'null';
+  }
+
+  // The rider/rider's name who accepted the order — shown inside the
+  // details once assigned, alongside the customer's own delivery details.
+  String? get _riderName {
+    final name =
+        data['riderName'] ??
+        data['rider_name'] ??
+        data['assignedRiderName'] ??
+        data['assigned_rider_name'] ??
+        data['driverName'] ??
+        data['driver_name'];
+    final s = (name ?? '').toString().trim();
+    if (s.isEmpty || s.toLowerCase() == 'null') return null;
+    return s;
   }
 
   String get _name => (data['customer_name'] ?? data['name'] ?? '—').toString();
@@ -488,6 +504,32 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                           ),
                         ),
                       ],
+                      if (_isScheduled &&
+                          _isOnlinePayment &&
+                          !_needsReceiptUpload) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: Colors.green.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Text(
+                            "Confirmed",
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green.shade800,
+                            ),
+                          ),
+                        ),
+                      ],
                       if (_needsReceiptUpload) ...[
                         const SizedBox(width: 6),
                         Container(
@@ -558,11 +600,11 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildStatusBanner(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   if (items.isNotEmpty) ...[
                     Padding(
-                      padding: const EdgeInsets.only(left: 4, bottom: 10),
+                      padding: const EdgeInsets.only(left: 4, bottom: 6),
                       child: Text(
                         "Items (${items.length})",
                         style: const TextStyle(
@@ -581,7 +623,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                     itemBuilder: (context, index) =>
                         _buildItemCard(items[index], index),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   _buildDetailsCard(),
                 ],
@@ -598,18 +640,11 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   Widget _buildStatusBanner() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: themeColor.withValues(alpha: 0.15)),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
       ),
       child: Row(
         children: [
@@ -656,32 +691,30 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   }
 
   Widget _buildDetailsCard() {
+    final riderName = _riderName;
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: themeColor.withValues(alpha: 0.15)),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _detailRow(Icons.person_rounded, "Name", _name),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.phone_rounded, "Phone", _phone),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.location_on_rounded, "Address", _address),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.schedule_rounded, "Delivery Time", _deliveryTime),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.payment_rounded, "Payment Method", _paymentMethod),
+          if (riderName != null) ...[
+            const SizedBox(height: 10),
+            _detailRow(Icons.delivery_dining_rounded, "Rider", riderName),
+          ],
         ],
       ),
     );
@@ -869,15 +902,16 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
   Widget _buildBottomBar(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: lightMaroon),
         boxShadow: const [
           BoxShadow(
             color: Colors.black12,
-            blurRadius: 10,
+            blurRadius: 8,
             offset: Offset(0, -2),
           ),
         ],

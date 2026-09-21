@@ -1,15 +1,48 @@
-import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:latlong2/latlong.dart' as latlong;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:latlong2/latlong.dart' as latlong;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'cart_provider.dart';
 import 'delivery_type.dart';
+import 'location_picker.dart';
+
+// Capitalizes the first letter of every word as the user types, and
+// lower-cases the rest of that word (so "ALI" -> "Ali", "aLi" -> "Ali").
+// Keeps the cursor exactly where it was, including mid-word edits.
+class CapitalizeWordsFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+
+    final buffer = StringBuffer();
+    bool capitalizeNext = true;
+
+    for (int i = 0; i < newValue.text.length; i++) {
+      final ch = newValue.text[i];
+      if (ch.trim().isEmpty) {
+        // whitespace — reset so the next letter typed is capitalized
+        buffer.write(ch);
+        capitalizeNext = true;
+      } else if (capitalizeNext) {
+        buffer.write(ch.toUpperCase());
+        capitalizeNext = false;
+      } else {
+        buffer.write(ch.toLowerCase());
+      }
+    }
+
+    return newValue.copyWith(
+      text: buffer.toString(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class CheckoutScreen extends StatefulWidget {
   final double totalAmount;
@@ -30,25 +63,24 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutLocationScreenState extends State<CheckoutScreen> {
-  GoogleMapController? _mapController;
-
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
-  final _searchCtrl = TextEditingController();
 
+  // 👈 FIXED: this is now latlong2's LatLng (same type LocationPickerScreen
+  // and DeliveryScreen use), instead of google_maps_flutter's LatLng.
+  // Those were two different classes with the same name, which caused a
+  // type-mismatch error when passing _pinLatLng into LocationPickerScreen.
   LatLng _pinLatLng = const LatLng(33.6844, 73.0479); // Default: Islamabad
-  bool _gpsLoading = false;
-  bool _isSearching = false;
-
-  List<Map<String, String>> _predictions = [];
-  Timer? _debounce;
-
   bool _saveInfoForNextTime = false;
+  bool _locationLoading = true;
 
   // ────────────────────────────────────────────────────────────
   // 🗺️ DELIVERY ZONE BOUNDARY (Cantt area) — RECTANGLE CORNERS
+  // Kept here too (in addition to LocationPickerScreen) purely as a
+  // final safety check before Proceed — the picker itself already
+  // blocks confirming a location outside this rectangle.
   // ────────────────────────────────────────────────────────────
   static const LatLng _zoneSouthWest = LatLng(33.7377237, 72.7183126);
   static const LatLng _zoneNorthEast = LatLng(33.8020805, 72.79845700000001);
@@ -69,11 +101,8 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // 🔑 Google Places API key
-  static const String _placesApiKey = 'AIzaSyDDTpx9ZaDEsDzGIOnrsWLQL3vHKz7DZU4';
-
-  // ---- CHANGED: keys are now scoped per logged-in user (uid), so a new
-  // account on the same phone never sees a previous account's saved info.
+  // ---- keys are scoped per logged-in user (uid), so a new account on
+  // the same phone never sees a previous account's saved info.
   String get _uid =>
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
@@ -81,20 +110,17 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   String get _kFirstName => 'checkout_first_name_$_uid';
   String get _kLastName => 'checkout_last_name_$_uid';
   String get _kPhone => 'checkout_phone_$_uid';
-  String get _kAddress => 'checkout_address_$_uid';
 
   static const bgColor = Colors.white;
-  static const primary = Color(0xFFA62600);
-  static const creamText = Color(0xFFFEF9E7);
+  static const primary = Color(0xFFA70000);
+  static const creamText = Colors.white;
   static const fieldBg = Color(0xFFFFFDFA);
 
   @override
   void initState() {
     super.initState();
     _loadSavedInfo();
-    // Auto-detect the customer's real location on open instead of leaving
-    // the pin on the Islamabad fallback until they manually tap GPS.
-    _handleGpsSelection(isAutoDetect: true);
+    _loadSavedLocation();
   }
 
   Future<void> _loadSavedInfo() async {
@@ -107,7 +133,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         _firstNameCtrl.text = prefs.getString(_kFirstName) ?? '';
         _lastNameCtrl.text = prefs.getString(_kLastName) ?? '';
         _phoneCtrl.text = prefs.getString(_kPhone) ?? '';
-        _addressCtrl.text = prefs.getString(_kAddress) ?? '';
       });
     }
   }
@@ -120,415 +145,111 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       await prefs.setString(_kFirstName, _firstNameCtrl.text.trim());
       await prefs.setString(_kLastName, _lastNameCtrl.text.trim());
       await prefs.setString(_kPhone, _phoneCtrl.text.trim());
-      await prefs.setString(_kAddress, _addressCtrl.text.trim());
     } else {
       await prefs.setBool(_kSaveFlag, false);
       await prefs.remove(_kFirstName);
       await prefs.remove(_kLastName);
       await prefs.remove(_kPhone);
-      await prefs.remove(_kAddress);
     }
+  }
+
+  // ────────────────────────────────────────────────────────────
+  // 📍 DELIVERY LOCATION — now backed by Firestore instead of the old
+  // in-screen Places search (which was failing). The full picker UI
+  // lives in LocationPickerScreen; this screen just shows the result
+  // and remembers it.
+  // ────────────────────────────────────────────────────────────
+
+  Future<void> _loadSavedLocation() async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('delivery_locations')
+          .doc(_uid)
+          .get();
+
+      final data = doc.data();
+      if (doc.exists && data != null) {
+        final lat = (data['latitude'] as num?)?.toDouble();
+        final lng = (data['longitude'] as num?)?.toDouble();
+        final address = data['address'] as String?;
+
+        if (lat != null &&
+            lng != null &&
+            address != null &&
+            address.trim().isNotEmpty) {
+          setState(() {
+            _pinLatLng = LatLng(lat, lng);
+            _addressCtrl.text = address;
+            _locationLoading = false;
+          });
+          _checkZone();
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load saved delivery location: $e');
+    }
+
+    // No saved location yet — open the map picker right away so the
+    // customer chooses one before filling in the rest of the form.
+    setState(() => _locationLoading = false);
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openLocationPicker();
+      });
+    }
+  }
+
+  Future<void> _saveLocationToFirestore(
+    String address,
+    double lat,
+    double lng,
+  ) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('delivery_locations')
+          .doc(_uid)
+          .set({
+            'address': address,
+            'latitude': lat,
+            'longitude': lng,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+    } catch (e) {
+      debugPrint('Failed to save delivery location: $e');
+    }
+  }
+
+  Future<void> _openLocationPicker() async {
+    final result = await Navigator.push<PickedLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationPickerScreen(initialLatLng: _pinLatLng),
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    setState(() {
+      _pinLatLng = LatLng(result.latitude, result.longitude);
+      _addressCtrl.text = result.address;
+    });
+    _checkZone();
+
+    await _saveLocationToFirestore(
+      result.address,
+      result.latitude,
+      result.longitude,
+    );
   }
 
   @override
   void dispose() {
-    _mapController?.dispose();
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _phoneCtrl.dispose();
     _addressCtrl.dispose();
-    _searchCtrl.dispose();
-    _debounce?.cancel();
     super.dispose();
-  }
-
-  Future<void> _updateAddressFromCoordinates(
-    double lat,
-    double lng, {
-    String? userSearchQuery,
-  }) async {
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/geocode/json'
-        '?latlng=$lat,$lng'
-        '&key=$_placesApiKey',
-      );
-
-      final res = await http.get(url);
-      final data = jsonDecode(res.body);
-
-      String? bestAddress;
-
-      if (data['status'] == 'OK') {
-        final results = data['results'] as List;
-
-        // Skip plus_code type results and addresses that match plus_code patterns
-        for (final r in results) {
-          final formatted = r['formatted_address'] as String? ?? '';
-          final types = List<String>.from(r['types'] ?? []);
-
-          final isPlusCode =
-              types.contains('plus_code') ||
-              RegExp(r'^[A-Z0-9]{4,8}\+[A-Z0-9]{2,4}').hasMatch(formatted);
-
-          if (isPlusCode) continue;
-
-          bestAddress = formatted;
-          break;
-        }
-
-        // Fallback to locality/area level address components if no street address is found
-        if (bestAddress == null) {
-          const preferredTypes = [
-            'sublocality_level_1',
-            'sublocality',
-            'locality',
-            'administrative_area_level_2',
-            'administrative_area_level_1',
-          ];
-
-          for (final r in results) {
-            final components = (r['address_components'] as List?) ?? [];
-            final parts = <String>[];
-
-            for (final preferred in preferredTypes) {
-              for (final c in components) {
-                final cTypes = List<String>.from(c['types'] ?? []);
-                if (cTypes.contains(preferred)) {
-                  final name = c['long_name'] as String?;
-                  if (name != null && !parts.contains(name)) parts.add(name);
-                  break;
-                }
-              }
-            }
-
-            if (parts.isNotEmpty) {
-              bestAddress = parts.join(', ');
-              break;
-            }
-          }
-        }
-      }
-
-      final String resolvedAddress =
-          bestAddress ??
-          (userSearchQuery ??
-              (_searchCtrl.text.trim().isNotEmpty
-                  ? _searchCtrl.text.trim()
-                  : 'Selected Location'));
-
-      setState(() {
-        // Keep the address field and the search field showing the exact
-        // same location so the user never has to update both separately.
-        _addressCtrl.text = resolvedAddress;
-        _searchCtrl.text = resolvedAddress;
-      });
-    } catch (_) {
-      final fallback = userSearchQuery ?? _searchCtrl.text.trim();
-      setState(() {
-        _addressCtrl.text = fallback;
-        _searchCtrl.text = fallback;
-      });
-    }
-  }
-
-  void _onMapTapped(LatLng position) {
-    setState(() {
-      _pinLatLng = position;
-      _predictions.clear();
-    });
-    _checkZone();
-    _updateAddressFromCoordinates(position.latitude, position.longitude);
-  }
-
-  void _onSearchChanged(String query) {
-    if (_debounce?.isActive ?? false) _debounce!.cancel();
-
-    if (query.trim().isEmpty) {
-      setState(() {
-        _predictions = [];
-        _isSearching = false;
-      });
-      return;
-    }
-
-    _debounce = Timer(const Duration(milliseconds: 400), () {
-      _fetchPredictions(query.trim());
-    });
-  }
-
-  // Uses the newer Places Autocomplete API so the search is restricted to
-  // an exact rectangle (the Cantt zone) instead of the legacy API's
-  // circular strictbounds, which could still let outside-zone places in.
-  Future<void> _fetchPredictions(String input) async {
-    setState(() => _isSearching = true);
-
-    try {
-      final url = Uri.parse(
-        'https://places.googleapis.com/v1/places:autocomplete',
-      );
-
-      final res = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': _placesApiKey,
-        },
-        body: jsonEncode({
-          'input': input,
-          'includedRegionCodes': ['pk'],
-          'locationRestriction': {
-            'rectangle': {
-              'low': {
-                'latitude': _zoneSouthWest.latitude,
-                'longitude': _zoneSouthWest.longitude,
-              },
-              'high': {
-                'latitude': _zoneNorthEast.latitude,
-                'longitude': _zoneNorthEast.longitude,
-              },
-            },
-          },
-        }),
-      );
-
-      final data = jsonDecode(res.body);
-
-      // TEMP DEBUG — remove once search is working. Prints the raw
-      // response so we can see exactly what Google is rejecting.
-      debugPrint('Autocomplete status: ${res.statusCode}');
-      debugPrint('Autocomplete body: ${res.body}');
-
-      if (res.statusCode == 200 && data['suggestions'] != null) {
-        final results = (data['suggestions'] as List)
-            .map<Map<String, String>?>((s) {
-              final prediction = s['placePrediction'];
-              if (prediction == null) return null;
-              return {
-                'description': (prediction['text']?['text'] ?? '') as String,
-                'place_id': (prediction['placeId'] ?? '') as String,
-              };
-            })
-            .whereType<Map<String, String>>()
-            .where((p) => p['place_id']!.isNotEmpty)
-            .where((p) => _mentionsWah(p['description']!))
-            .toList();
-
-        setState(() {
-          _predictions = results;
-          _isSearching = false;
-        });
-      } else {
-        setState(() {
-          _predictions = [];
-          _isSearching = false;
-        });
-      }
-    } catch (_) {
-      setState(() {
-        _predictions = [];
-        _isSearching = false;
-      });
-    }
-  }
-
-  // Belt-and-suspenders filter on top of locationRestriction — some
-  // well-known place names can still slip past the rectangle bound, so
-  // this drops any prediction whose text doesn't actually mention Wah.
-  // Uses a word boundary so it won't false-match things like "Wahdat".
-  bool _mentionsWah(String description) {
-    return RegExp(r'\bwah\b', caseSensitive: false).hasMatch(description);
-  }
-
-  Future<void> _selectPrediction(Map<String, String> prediction) async {
-    FocusScope.of(context).unfocus();
-    final selectedDescription = prediction['description'] ?? '';
-
-    setState(() {
-      _predictions = [];
-      _searchCtrl.text = selectedDescription;
-      _isSearching = true;
-    });
-
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/place/details/json'
-        '?place_id=${prediction['place_id']}'
-        '&fields=geometry,formatted_address'
-        '&key=$_placesApiKey',
-      );
-
-      final res = await http.get(url);
-      final data = jsonDecode(res.body);
-
-      if (data['status'] == 'OK') {
-        final loc = data['result']['geometry']['location'];
-        final target = LatLng(loc['lat'], loc['lng']);
-
-        // Prefer the full, proper address from Place Details
-        // (formatted_address) over the short autocomplete description,
-        // so the field shows a complete address rather than just a
-        // place/area name. Fall back to the description only if Google
-        // didn't return a formatted address at all.
-        final String? formattedAddress =
-            data['result']['formatted_address'] as String?;
-        final String finalAddress =
-            (formattedAddress != null && formattedAddress.trim().isNotEmpty)
-            ? formattedAddress
-            : (selectedDescription.isNotEmpty
-                  ? selectedDescription
-                  : 'Selected Location');
-
-        setState(() {
-          _pinLatLng = target;
-          // Keep both fields showing the exact same resolved location.
-          _addressCtrl.text = finalAddress;
-          _searchCtrl.text = finalAddress;
-          _isSearching = false;
-        });
-
-        _checkZone();
-
-        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, 16.0));
-      } else {
-        setState(() => _isSearching = false);
-        _snack('Could not fetch that location. Please try again.');
-      }
-    } catch (_) {
-      setState(() => _isSearching = false);
-      _snack(
-        'Could not fetch that location. Please check your internet connection.',
-      );
-    }
-  }
-
-  // Handles the case where the user types an address and hits
-  // search/enter instead of tapping a suggestion from the dropdown.
-  // If suggestions are already showing, the top one is used (same
-  // outcome as tapping it). Otherwise we forward-geocode whatever text
-  // they typed so the map still moves to match the search field.
-  Future<void> _handleSearchSubmit(String query) async {
-    final trimmed = query.trim();
-    if (trimmed.isEmpty) return;
-
-    FocusScope.of(context).unfocus();
-
-    if (_predictions.isNotEmpty) {
-      await _selectPrediction(_predictions.first);
-      return;
-    }
-
-    setState(() => _isSearching = true);
-
-    try {
-      final url = Uri.parse(
-        'https://maps.googleapis.com/maps/api/geocode/json'
-        '?address=${Uri.encodeComponent(trimmed)}'
-        '&region=pk'
-        '&key=$_placesApiKey',
-      );
-
-      final res = await http.get(url);
-      final data = jsonDecode(res.body);
-
-      if (data['status'] == 'OK' && (data['results'] as List).isNotEmpty) {
-        final result = data['results'][0];
-        final loc = result['geometry']['location'];
-        final target = LatLng(loc['lat'], loc['lng']);
-        final String fullAddress =
-            (result['formatted_address'] as String?) ?? trimmed;
-
-        setState(() {
-          _pinLatLng = target;
-          _addressCtrl.text = fullAddress;
-          _searchCtrl.text = fullAddress;
-          _isSearching = false;
-        });
-
-        _checkZone();
-        _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, 16.0));
-      } else {
-        setState(() => _isSearching = false);
-        _snack(
-          'Could not find that location. Please try selecting from the suggestions.',
-        );
-      }
-    } catch (_) {
-      setState(() => _isSearching = false);
-      _snack(
-        'Could not fetch that location. Please check your internet connection.',
-      );
-    }
-  }
-
-  Future<void> _handleGpsSelection({bool isAutoDetect = false}) async {
-    setState(() => _gpsLoading = true);
-
-    try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
-      }
-      if (perm == LocationPermission.deniedForever ||
-          perm == LocationPermission.denied) {
-        // On the silent auto-detect we just fall back to the default pin
-        // instead of interrupting the user with a snackbar right away.
-        if (!isAutoDetect) {
-          _snack('Location permission denied. Please allow it from settings.');
-        }
-        setState(() => _gpsLoading = false);
-        return;
-      }
-
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (!isAutoDetect) {
-          _snack('Please enable GPS/location services.');
-        }
-        setState(() => _gpsLoading = false);
-        return;
-      }
-
-      // 👈 FIX: 'high' can still return a fix that's 50-100m off,
-      // especially indoors/inside large buildings like a college campus
-      // (GPS signals bounce off walls, sometimes landing on the nearest
-      // road instead of the actual building). 'best' asks the device to
-      // try harder for precision before returning a result.
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.best,
-      );
-
-      final newLatLng = LatLng(pos.latitude, pos.longitude);
-      await _updateAddressFromCoordinates(pos.latitude, pos.longitude);
-
-      setState(() {
-        _pinLatLng = newLatLng;
-        _gpsLoading = false;
-      });
-
-      _checkZone();
-
-      // 👈 NEW: pos.accuracy is the GPS fix's margin of error in meters.
-      // When it's poor (common indoors/inside campuses), nudge the
-      // customer to check the pin themselves — it's already draggable
-      // and tappable, they just need a reason to double-check it instead
-      // of trusting a GPS fix that silently landed on the wrong building.
-      if (pos.accuracy > 30) {
-        _snack(
-          'GPS signal is weak here — please check the pin is on the '
-          'right spot and drag it if needed.',
-        );
-      }
-
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLngZoom(newLatLng, 17.0),
-      );
-    } catch (_) {
-      setState(() => _gpsLoading = false);
-      if (!isAutoDetect) {
-        _snack('Failed to get GPS location.');
-      }
-    }
   }
 
   void _proceedToDeliveryScreen() async {
@@ -547,7 +268,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       return;
     }
     if (address.isEmpty) {
-      _snack('Please enter or confirm your complete delivery address.');
+      _snack('Please choose your delivery location on the map.');
       return;
     }
     if (!_isInZone) {
@@ -613,7 +334,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildMapSection(),
+            _buildLocationCard(),
             Padding(
               padding: const EdgeInsets.all(20),
               child: _buildFormSection(),
@@ -625,217 +346,92 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     );
   }
 
-  Widget _buildMapSection() {
-    return SizedBox(
-      height: 300,
-      child: Stack(
-        children: [
-          GoogleMap(
-            initialCameraPosition: CameraPosition(
-              target: _pinLatLng,
-              zoom: 15.0,
-            ),
-            onMapCreated: (controller) {
-              _mapController = controller;
-              // In case GPS already resolved before the map finished
-              // loading, make sure the camera reflects the current pin
-              // instead of staying on the initial default.
-              controller.animateCamera(
-                CameraUpdate.newLatLngZoom(_pinLatLng, 15.0),
-              );
-            },
-            onTap: _onMapTapped,
-            markers: {
-              Marker(
-                markerId: const MarkerId('selected_delivery_location'),
-                position: _pinLatLng,
-                draggable: true,
-                onDragEnd: (newPosition) => _onMapTapped(newPosition),
-                infoWindow: const InfoWindow(title: 'Delivery Location'),
+  Widget _buildLocationCard() {
+    final hasAddress = _addressCtrl.text.trim().isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: fieldBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: primary.withValues(alpha: 0.15)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
               ),
-            },
-            myLocationEnabled: true,
-            myLocationButtonEnabled: false,
-            zoomControlsEnabled: false,
-          ),
-
-          // Search Bar
-          Positioned(
-            top: 12,
-            left: 12,
-            right: 12,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Card(
-                  elevation: 4,
-                  color: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 2,
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.search, color: primary, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: _searchCtrl,
-                            textInputAction: TextInputAction.search,
-                            onChanged: _onSearchChanged,
-                            onSubmitted: _handleSearchSubmit,
-                            style: const TextStyle(fontSize: 13.5),
-                            decoration: InputDecoration(
-                              hintText: 'Search street, area, or sector...',
-                              border: InputBorder.none,
-                              hintStyle: const TextStyle(fontSize: 13),
-                              isDense: true,
-                              suffixIcon: _searchCtrl.text.isNotEmpty
-                                  ? IconButton(
-                                      icon: const Icon(
-                                        Icons.clear,
-                                        size: 16,
-                                        color: Colors.grey,
-                                      ),
-                                      onPressed: () {
-                                        _searchCtrl.clear();
-                                        setState(() => _predictions.clear());
-                                      },
-                                    )
-                                  : null,
-                            ),
-                          ),
-                        ),
-                        if (_isSearching)
-                          const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: primary,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // ---- CHANGED: predictions dropdown now matches the
-                // search field's white background (was fieldBg cream) ----
-                if (_predictions.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    constraints: const BoxConstraints(maxHeight: 200),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      padding: EdgeInsets.zero,
-                      itemCount: _predictions.length,
-                      separatorBuilder: (context, index) =>
-                          const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item = _predictions[index];
-                        return ListTile(
-                          dense: true,
-                          leading: const Icon(
-                            Icons.location_on_rounded,
-                            color: primary,
-                            size: 18,
-                          ),
-                          title: Text(
-                            item['description'] ?? '',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                          onTap: () => _selectPrediction(item),
-                        );
-                      },
-                    ),
-                  ),
-              ],
+              child: const Icon(
+                Icons.location_on_rounded,
+                color: primary,
+                size: 22,
+              ),
             ),
-          ),
-
-          // "Use My Location" GPS button
-          Positioned(
-            bottom: 12,
-            right: 12,
-            child: FloatingActionButton.small(
-              heroTag: 'gps_btn',
-              backgroundColor: primary,
-              onPressed: _gpsLoading ? null : _handleGpsSelection,
-              child: _gpsLoading
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: creamText,
-                      ),
-                    )
-                  : const Icon(
-                      Icons.my_location_rounded,
-                      color: creamText,
-                      size: 20,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Delivery Location',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w600,
                     ),
-            ),
-          ),
-
-          // Out-of-zone banner
-          if (!_isInZone)
-            Positioned(
-              bottom: 12,
-              left: 12,
-              right: 70,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.shade300),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.error_outline_rounded,
-                      color: Colors.red.shade700,
-                      size: 16,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _locationLoading
+                        ? 'Loading your saved location...'
+                        : (hasAddress
+                              ? _addressCtrl.text.trim()
+                              : 'No location selected yet'),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
                     ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'We only deliver within the Cantt area.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.red.shade800,
-                          fontWeight: FontWeight.w600,
-                        ),
+                  ),
+                  if (!_locationLoading && !_isInZone) ...[
+                    const SizedBox(height: 4),
+                    const Text(
+                      'This location is outside our delivery zone.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.red,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _openLocationPicker,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+              ),
+              child: Text(
+                hasAddress ? 'Change' : 'Choose',
+                style: const TextStyle(
+                  color: primary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
                 ),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -854,7 +450,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Address auto-fills from map/GPS — you can edit it if needed.',
+          'Address is set from the map above — you can fine-tune it here if needed.',
           style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 16),
@@ -874,6 +470,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
                 _firstNameCtrl,
                 'First Name',
                 Icons.person,
+                capitalizeWords: true,
               ),
             ),
             const SizedBox(width: 12),
@@ -882,6 +479,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
                 _lastNameCtrl,
                 'Last Name',
                 Icons.person_outline,
+                capitalizeWords: true,
               ),
             ),
           ],
@@ -937,6 +535,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     int? maxLength,
     bool readOnly = false,
     int maxLines = 1,
+    bool capitalizeWords = false,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -955,6 +554,15 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         maxLength: maxLength,
         readOnly: readOnly,
         maxLines: maxLines,
+        // Auto-capitalizes the first letter of each word as the user
+        // types (e.g. "ali khan" -> "Ali Khan"). textCapitalization only
+        // switches the on-screen keyboard's shift state; the formatter
+        // is what actually enforces it in the text itself, including
+        // pasted text or a hardware keyboard.
+        textCapitalization: capitalizeWords
+            ? TextCapitalization.words
+            : TextCapitalization.none,
+        inputFormatters: capitalizeWords ? [CapitalizeWordsFormatter()] : null,
         style: const TextStyle(
           fontWeight: FontWeight.w500,
           color: Colors.black87,

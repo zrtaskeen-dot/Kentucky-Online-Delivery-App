@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'cart_provider.dart'; // For CartItem
 import 'main_navigation.dart'; // 👈 CHANGED: HomeScreen ki jagah MainScreen import kiya (bottom nav bar ke liye)
 import 'package:latlong2/latlong.dart';
@@ -29,10 +30,12 @@ class OrderDetailsScreen extends StatelessWidget {
     this.receiptUploaded = false,
   });
 
-  static const Color themeColor = Color(0xFFA62600);
-  static const Color bgColor = Color(0xFFFEF9E7);
-  static const Color cardColor = Color(0xFFFFFFF0);
-  static const Color lightMaroon = Color(0xFFFFF3F1);
+  // 👈 Matches HomeScreen's actual brand palette exactly (not a guess anymore)
+  static const Color themeColor = Color(0xFFA70000); // Brand Maroon
+  static const Color accentOrange = Color(0xFFFF8A00); // Brand Orange
+  static const Color bgColor = Colors.white; // Pure white, same as HomeScreen
+  static const Color cardColor = Color(0xFFFFFDFA); // Near-white cards
+  static const Color lightMaroon = Color(0x33A70000); // ~20% maroon border
 
   // Delivery screen sets deliveryTime to "Standard Delivery" for
   // immediate orders, and a formatted date/time string for scheduled
@@ -66,7 +69,7 @@ class OrderDetailsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
-        // 👈 CHANGED: maroon app bar with cream title, no back arrow (kept automaticallyImplyLeading: false)
+        // 👈 CHANGED: maroon app bar with white title, no back arrow (kept automaticallyImplyLeading: false)
         backgroundColor: themeColor,
         elevation: 0,
         automaticallyImplyLeading: false,
@@ -75,16 +78,45 @@ class OrderDetailsScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.bold, color: bgColor),
         ),
         centerTitle: true,
+        // 👈 Cancel Order now lives inside this menu — off the main
+        // card/view, only shown for scheduled orders.
+        actions: [
+          if (_isScheduled)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded, color: bgColor),
+              onSelected: (value) {
+                if (value == 'cancel') _cancelOrder(context);
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'cancel',
+                  child: Row(
+                    children: [
+                      Icon(Icons.cancel_outlined, size: 18, color: Colors.red),
+                      SizedBox(width: 10),
+                      Text('Cancel Order', style: TextStyle(color: Colors.red)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+        ],
       ),
       body: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Items now shown first, no separate section header ──
+                  // ── Status section (kept inside the details screen — for
+                  // scheduled orders this is where "Confirmed" shows, not on
+                  // the My Orders card) ──
+                  _buildStatusBanner(),
+                  const SizedBox(height: 8),
+
+                  // ── Items ──
                   ListView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -94,10 +126,10 @@ class OrderDetailsScreen extends StatelessWidget {
                       return _buildItemCard(item);
                     },
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
 
                   // ── Customer / Delivery Details Card ──
-                  _buildDetailsCard(),
+                  _buildDeliveryDetailsCard(),
                 ],
               ),
             ),
@@ -108,70 +140,95 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildDetailsCard() {
+  // Scheduled orders show "Confirmed" here once the receipt is uploaded
+  // (or immediately for COD, since only online payment needs a receipt).
+  // Non-scheduled ("Deliver Now") orders just show the placed confirmation —
+  // their ongoing Pending/Accepted/Delivered status lives on the My Orders
+  // card, not here.
+  Widget _buildStatusBanner() {
+    final String label = _isPendingReceiptUpload
+        ? "Not Confirmed"
+        : (_isScheduled && _isOnlinePayment)
+        ? "Confirmed"
+        : "Order Placed Successfully!";
+
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: themeColor.withValues(alpha: 0.15)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: (_isPendingReceiptUpload ? Colors.orange : themeColor)
+                  .withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              _isPendingReceiptUpload
+                  ? Icons.hourglass_top_rounded
+                  : Icons.check_circle_rounded,
+              color: _isPendingReceiptUpload
+                  ? Colors.orange.shade800
+                  : themeColor,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
+                if (_isPendingReceiptUpload) ...[
+                  const SizedBox(height: 2),
+                  const Text(
+                    "Order will be confirmed once you upload the receipt "
+                    "two hours before delivery.",
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDeliveryDetailsCard() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: themeColor.withValues(alpha: 0.15)),
         boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
+          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 3)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: (_isPendingReceiptUpload ? Colors.orange : themeColor)
-                      .withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  _isPendingReceiptUpload
-                      ? Icons.hourglass_top_rounded
-                      : Icons.check_circle_rounded,
-                  color: _isPendingReceiptUpload
-                      ? Colors.orange.shade800
-                      : themeColor,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  _isPendingReceiptUpload
-                      ? "Order will be confirmed once you upload the "
-                            "receipt two hours before delivery."
-                      : "Order Placed Successfully!",
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Divider(color: Color(0xFFEEEEEE)),
-          const SizedBox(height: 12),
           _detailRow(Icons.person_rounded, "Name", userName),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.phone_rounded, "Phone", userPhone),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.location_on_rounded, "Address", addressDetails),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.schedule_rounded, "Delivery Time", deliveryTime),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           _detailRow(Icons.payment_rounded, "Payment Method", paymentMethod),
         ],
       ),
@@ -298,19 +355,67 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  // ── Bottom Total + Button Bar (Track Order button removed) ──
+  // Cancels a scheduled order. Uses 'order_status' — same field HomeScreen
+  // already reads/writes for order state (e.g. 'Delivered').
+  Future<void> _cancelOrder(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Cancel Order?"),
+        content: const Text(
+          "Are you sure you want to cancel this scheduled order?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("No"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              "Yes, Cancel",
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    try {
+      await FirebaseFirestore.instance.collection('orders').doc(orderId).update(
+        {'order_status': 'Cancelled'},
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text("Order cancelled.")));
+        goBackToMenu(context);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Failed to cancel order: $e")));
+      }
+    }
+  }
+
+  // ── Bottom Total + Button Bar (Cancel Order moved to the AppBar menu;
+  // Track Order lives on the My Orders detail screen, not here) ──
   Widget _buildBottomBar(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        // 👈 CHANGED: same field/card color as the rest of the flow instead of plain white
         color: cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: lightMaroon),
         boxShadow: const [
           BoxShadow(
             color: Colors.black12,
-            blurRadius: 10,
+            blurRadius: 8,
             offset: Offset(0, -2),
           ),
         ],
@@ -326,7 +431,7 @@ class OrderDetailsScreen extends StatelessWidget {
                 const Text(
                   "Total",
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.w500,
                     color: Colors.black87,
                   ),
@@ -334,23 +439,23 @@ class OrderDetailsScreen extends StatelessWidget {
                 Text(
                   "Rs. ${totalAmount.toStringAsFixed(0)}",
                   style: const TextStyle(
-                    fontSize: 20,
+                    fontSize: 19,
                     fontWeight: FontWeight.bold,
                     color: themeColor,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              height: 50,
+              height: 46,
               child: ElevatedButton(
                 onPressed: () => goBackToMenu(context),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: themeColor,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   elevation: 0,
                 ),
@@ -358,7 +463,7 @@ class OrderDetailsScreen extends StatelessWidget {
                   "Back to Menu",
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                   ),
                 ),

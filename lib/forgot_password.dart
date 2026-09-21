@@ -14,10 +14,10 @@ class _ForgotPasswordState extends State<ForgotPassword> {
   bool _isLoading = false;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  static const bg = Color(0xFFFCF8DD);
+  static const bg = Colors.white;
   static const primary = Color(0xFFA70000);
-  static const creamText = Color(0xFFFEF9E7);
-  static const fieldBg = Color(0xFFFFFFF0);
+  static const creamText = Colors.white;
+  static const fieldBg = Color(0xFFFFFDFA);
 
   Future<void> _resetPassword() async {
     if (!_formKey.currentState!.validate()) return;

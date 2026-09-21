@@ -20,8 +20,8 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
 
   // ── Theme (matches app's maroon/cream palette) ──
   static const Color primaryRed = Color(0xFFA70000);
-  static const Color deepRed = Color(0xFF9A1B1B);
-  static const Color creamColor = Color(0xFFFFFDF3);
+  static const Color deepRed = Color(0xFF7A1A00);
+  static const Color creamColor = Color(0xFFFFFDFA);
 
   @override
   Widget build(BuildContext context) {

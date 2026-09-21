@@ -2,16 +2,53 @@ import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+
+// Capitalizes the first letter of every word as the user types (e.g.
+// "ali khan" -> "Ali Khan"), and lower-cases the rest of that word.
+class CapitalizeWordsFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) return newValue;
+
+    final buffer = StringBuffer();
+    bool capitalizeNext = true;
+
+    for (int i = 0; i < newValue.text.length; i++) {
+      final ch = newValue.text[i];
+      if (ch.trim().isEmpty) {
+        buffer.write(ch);
+        capitalizeNext = true;
+      } else if (capitalizeNext) {
+        buffer.write(ch.toUpperCase());
+        capitalizeNext = false;
+      } else {
+        buffer.write(ch.toLowerCase());
+      }
+    }
+
+    return newValue.copyWith(
+      text: buffer.toString(),
+      selection: newValue.selection,
+    );
+  }
+}
 
 class RiderProfileScreen extends StatefulWidget {
   final String riderId;
   const RiderProfileScreen({super.key, required this.riderId});
 
-  static const Color primary = Color(0xFFA30000); // Maroon
-  static const Color cardBgColor = Color(0xFFFFFFF0); // Card Color
-  static const Color bgColor = Color(0xFFFFFDF0); // Theme Background
+  // 👈 Matches Home screen's exact brand palette (maroon + white + card tint)
+  static const Color primary = Color(0xFFA70000); // Maroon (same as Home)
+  static const Color cardBgColor = Color(
+    0xFFFFFDFA,
+  ); // Card Color (same as Home)
+  static const Color bgColor = Colors.white; // Theme Background (same as Home)
 
   @override
   State<RiderProfileScreen> createState() => _RiderProfileScreenState();
@@ -172,6 +209,8 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                     // Editable Name Field
                     TextField(
                       controller: nameController,
+                      textCapitalization: TextCapitalization.words,
+                      inputFormatters: [CapitalizeWordsFormatter()],
                       decoration: const InputDecoration(
                         labelText: 'Full Name',
                         prefixIcon: Icon(

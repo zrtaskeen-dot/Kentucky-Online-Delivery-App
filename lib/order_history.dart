@@ -152,11 +152,13 @@ Future<void> _reorderItems(
 class OrderHistoryScreen extends StatelessWidget {
   const OrderHistoryScreen({super.key});
 
-  static const Color themeColor = Color(0xFFA70000);
-  static const Color bgColor = Color(0xFFFCF8DD);
-  static const Color creamColor = Color(0xFFFEF9E7);
-  static const Color cardColor = Color(0xFFFFFFF0);
-  static const Color outlineColor = Colors.black26;
+  // 👈 Matches HomeScreen's actual brand palette: white bg + orange/maroon
+  static const Color themeColor = Color(0xFFA70000); // Brand Maroon
+  static const Color accentOrange = Color(0xFFFF8A00); // Brand Orange
+  static const Color bgColor = Colors.white;
+  static const Color creamColor = Colors.white;
+  static const Color cardColor = Color(0xFFFFFDFA);
+  static const Color outlineColor = Color(0x33A70000);
 
   static const List<String> _pastStatuses = ['delivered', 'cancelled'];
 
@@ -234,7 +236,7 @@ class OrderHistoryScreen extends StatelessWidget {
           }
 
           return ListView(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
               if (activeDocs.isNotEmpty) ...[
                 _sectionHeader("Active Orders", Icons.local_shipping_rounded),
@@ -370,9 +372,8 @@ class OrderHistoryScreen extends StatelessWidget {
 // until something else (a data change, re-navigating, etc.) triggered
 // a rebuild.
 class _LiveTicker extends StatefulWidget {
-  const _LiveTicker({
-    required this.builder,
-  }) : interval = const Duration(seconds: 30);
+  const _LiveTicker({required this.builder})
+    : interval = const Duration(seconds: 30);
 
   final WidgetBuilder builder;
   final Duration interval;
@@ -456,65 +457,6 @@ class _OrderCard extends StatelessWidget {
   bool get _needsReceiptUpload =>
       !isPast && _isScheduled && _isOnlinePayment && _receiptUrl.isEmpty;
 
-  // Parses delivery_screen.dart's "6 Sep 2026 at 05:30 PM" label back
-  // into a DateTime — same parsing as order_history_detail.dart, kept
-  // in sync so both screens agree on the cancel cutoff.
-  DateTime? get _scheduledDateTime {
-    if (!_isScheduled) return null;
-    try {
-      final parts = _deliveryTime.split(' at ');
-      if (parts.length != 2) return null;
-
-      final dateSegs = parts[0].trim().split(' ');
-      if (dateSegs.length != 3) return null;
-      final day = int.tryParse(dateSegs[0]);
-      final year = int.tryParse(dateSegs[2]);
-      const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
-      ];
-      final month = months.indexOf(dateSegs[1]) + 1;
-      if (day == null || year == null || month == 0) return null;
-
-      final timeMatch = RegExp(
-        r'^(\d{1,2}):(\d{2})\s*(AM|PM)$',
-        caseSensitive: false,
-      ).firstMatch(parts[1].trim());
-      if (timeMatch == null) return null;
-
-      int hour = int.parse(timeMatch.group(1)!);
-      final minute = int.parse(timeMatch.group(2)!);
-      final period = timeMatch.group(3)!.toUpperCase();
-      if (period == 'PM' && hour != 12) hour += 12;
-      if (period == 'AM' && hour == 12) hour = 0;
-
-      return DateTime(year, month, day, hour, minute);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  // How long before the scheduled delivery time a customer can still
-  // cancel. Fails closed if the time can't be parsed.
-  static const Duration _cancelCutoff = Duration(hours: 1, minutes: 30);
-
-  bool get _canCancelOrder {
-    if (isPast || !_isScheduled) return false;
-    final dt = _scheduledDateTime;
-    if (dt == null) return false;
-    return DateTime.now().isBefore(dt.subtract(_cancelCutoff));
-  }
-
   Color get _statusColor {
     switch (_status) {
       case 'delivered':
@@ -527,61 +469,6 @@ class _OrderCard extends StatelessWidget {
       default:
         return Colors.orange;
     }
-  }
-
-  Future<void> _confirmCancelOrder(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text(
-          'Cancel this order?',
-          style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black87),
-        ),
-        content: Text(
-          'This will cancel your scheduled order for $_deliveryTime. '
-          'This action cannot be undone.',
-          style: TextStyle(color: Colors.grey[700], fontSize: 13),
-        ),
-        actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            style: TextButton.styleFrom(foregroundColor: Colors.grey[600]),
-            child: const Text('Keep Order'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text(
-              'Cancel Order',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    if (!_canCancelOrder) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Too close to the delivery time to cancel now."),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
-    await FirebaseFirestore.instance.collection('orders').doc(orderId).update({
-      'order_status': 'cancelled',
-      'cancelledBy': 'customer',
-      'cancelledAt': FieldValue.serverTimestamp(),
-    });
   }
 
   void _showCancellationDialog(BuildContext context) {
@@ -634,19 +521,19 @@ class _OrderCard extends StatelessWidget {
       onTap: () {
         OrderHistoryDetailScreen.show(context, orderId: orderId, data: data);
       },
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(14),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
+        margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: cardColor,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: outlineColor),
-          boxShadow: [
+          boxShadow: const [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
+              color: Color.fromRGBO(0, 0, 0, 0.04),
+              blurRadius: 8,
+              offset: Offset(0, 3),
             ),
           ],
         ),
@@ -664,7 +551,7 @@ class _OrderCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 13,
+                            fontSize: 12,
                             color: Colors.black87,
                           ),
                         ),
@@ -693,30 +580,10 @@ class _OrderCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                      if (_needsReceiptUpload) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: Colors.orange.withValues(alpha: 0.35),
-                            ),
-                          ),
-                          child: Text(
-                            "Not Confirmed",
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade800,
-                            ),
-                          ),
-                        ),
-                      ],
+                      // Confirmation status (Not Confirmed / Confirmed) is
+                      // intentionally NOT shown here — only inside the
+                      // order details sheet, per the "Confirmed" status
+                      // living in details, not on the card, requirement.
                     ],
                   ),
                 ),
@@ -741,57 +608,15 @@ class _OrderCard extends StatelessWidget {
               ],
             ),
 
-            if (_dateLabel.isNotEmpty || !isPast) ...[
+            if (_dateLabel.isNotEmpty) ...[
               const SizedBox(height: 2),
-              Row(
-                children: [
-                  if (_dateLabel.isNotEmpty)
-                    Expanded(
-                      child: Text(
-                        _dateLabel,
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ),
-                  if (!isPast) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: themeColor.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(
-                            Icons.location_on_rounded,
-                            size: 10,
-                            color: themeColor,
-                          ),
-                          SizedBox(width: 2),
-                          Text(
-                            "Live Tracking",
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w600,
-                              color: themeColor,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
+              Text(
+                _dateLabel,
+                style: const TextStyle(fontSize: 10, color: Colors.grey),
               ),
             ],
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(
               children: [
                 ...displayThumbs.map((item) => _thumb(item)),
@@ -800,12 +625,12 @@ class _OrderCard extends StatelessWidget {
                 const Icon(
                   Icons.chevron_right_rounded,
                   color: Colors.black38,
-                  size: 20,
+                  size: 18,
                 ),
               ],
             ),
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -818,56 +643,18 @@ class _OrderCard extends StatelessWidget {
                   "Rs. ${_total.toStringAsFixed(0)}",
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                    fontSize: 13,
                     color: themeColor,
                   ),
                 ),
               ],
             ),
 
-            if (_isScheduled && !isPast) ...[
-              const SizedBox(height: 8),
-              _LiveTicker(
-                builder: (context) => _canCancelOrder
-                    ? SizedBox(
-                        width: double.infinity,
-                        height: 32,
-                        child: OutlinedButton.icon(
-                          onPressed: () => _confirmCancelOrder(context),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            padding: EdgeInsets.zero,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          icon: const Icon(Icons.cancel_outlined, size: 14),
-                          label: const Text(
-                            "Cancel Order",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      )
-                    : Text(
-                        "Can't cancel — within 1h 30m of delivery",
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-              ),
-            ],
-
             if (_status == 'cancelled') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               SizedBox(
                 width: double.infinity,
-                height: 32,
+                height: 28,
                 child: OutlinedButton.icon(
                   onPressed: () => _showCancellationDialog(context),
                   style: OutlinedButton.styleFrom(
@@ -878,21 +665,21 @@ class _OrderCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(8),
                     ),
                   ),
-                  icon: const Icon(Icons.info_outline_rounded, size: 14),
+                  icon: const Icon(Icons.info_outline_rounded, size: 13),
                   label: const Text(
                     "View Cancellation Reason",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                   ),
                 ),
               ),
             ],
 
             if (items.isNotEmpty && _status != 'cancelled') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Align(
                 alignment: Alignment.centerRight,
                 child: SizedBox(
-                  height: 30,
+                  height: 26,
                   child: ElevatedButton.icon(
                     onPressed: () async => await _reorder(
                       context,
@@ -903,17 +690,17 @@ class _OrderCard extends StatelessWidget {
                       backgroundColor: themeColor,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
                     ),
-                    icon: const Icon(Icons.replay_rounded, size: 13),
+                    icon: const Icon(Icons.replay_rounded, size: 12),
                     label: const Text(
                       "Reorder",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 11,
+                        fontSize: 10.5,
                       ),
                     ),
                   ),
@@ -935,8 +722,8 @@ class _OrderCard extends StatelessWidget {
         child: imageUrl.isNotEmpty
             ? Image.network(
                 imageUrl,
-                width: 36,
-                height: 36,
+                width: 30,
+                height: 30,
                 fit: BoxFit.cover,
                 errorBuilder: (_, __, ___) => _fallbackThumb(),
               )
@@ -947,17 +734,17 @@ class _OrderCard extends StatelessWidget {
 
   Widget _fallbackThumb() {
     return Container(
-      width: 36,
-      height: 36,
+      width: 30,
+      height: 30,
       color: themeColor.withValues(alpha: 0.1),
-      child: const Icon(Icons.fastfood_rounded, color: themeColor, size: 18),
+      child: const Icon(Icons.fastfood_rounded, color: themeColor, size: 16),
     );
   }
 
   Widget _extraBadge(int count) {
     return Container(
-      width: 36,
-      height: 36,
+      width: 30,
+      height: 30,
       decoration: BoxDecoration(
         color: themeColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
@@ -967,7 +754,7 @@ class _OrderCard extends StatelessWidget {
         "+$count",
         style: const TextStyle(
           fontWeight: FontWeight.bold,
-          fontSize: 11,
+          fontSize: 10,
           color: themeColor,
         ),
       ),

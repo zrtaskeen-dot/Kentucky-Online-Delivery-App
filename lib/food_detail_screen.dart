@@ -19,8 +19,11 @@ class FoodDetailScreen extends StatefulWidget {
 }
 
 class _FoodDetailScreenState extends State<FoodDetailScreen> {
-  static const primary = Color(0xFFB12C00);
-  static const bgColor = Color(0xFFFFFDF3);
+  // App Theme Colors (matches the rest of the app's maroon brand palette)
+  static const Color themeColor = Color(0xFFA70000); // Main Maroon Accent
+  static const Color bgColor = Colors.white; // Matches cardColor/bottom bar
+  static const Color lightMaroon = Color(0x33A70000);
+  static const Color cardColor = Color(0xFFFFFDFA);
 
   int quantity = 1;
   bool isAddingToCart = false;
@@ -47,7 +50,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
 
   String get sizeSelectorTitle => isWings ? 'Select Pieces' : 'Select Size';
 
-  // 🟢 Size key ko readable label mein convert karo
   String _formatSizeLabel(String key) {
     switch (key.toLowerCase()) {
       case 'small':
@@ -77,8 +79,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     }
   }
 
-  Map<String, dynamic> get pricesMap =>
-      ((widget.item.prices as Map).isNotEmpty)
+  Map<String, dynamic> get pricesMap => ((widget.item.prices as Map).isNotEmpty)
       ? Map<String, dynamic>.from(widget.item.prices as Map)
       : {};
 
@@ -126,11 +127,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     return total;
   }
 
-  // Base unit price for one item (size + toppings, quantity NOT applied).
-  // This is what gets stored in Firestore's 'price' field, so the cart's
-  // quantity stepper doesn't multiply an already-multiplied price.
   int get unitPrice => basePrice + toppingsPrice;
-
   int get totalPrice => unitPrice * quantity;
 
   @override
@@ -162,15 +159,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     setState(() => isAddingToCart = true);
     try {
       final int price = unitPrice;
-
-      if (price <= 0) {
-        debugPrint(
-          '⚠️ unitPrice resolved to 0 for "${widget.item.name}". '
-          'Raw prices field: ${widget.item.prices} '
-          '(type: ${widget.item.prices.runtimeType}) '
-          'basePrice=$basePrice toppingsPrice=$toppingsPrice quantity=$quantity',
-        );
-      }
 
       final toppingNames = selectedToppings
           .map((id) => toppingsData[id]?['name']?.toString() ?? '')
@@ -209,7 +197,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            backgroundColor: primary,
+            backgroundColor: themeColor,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
@@ -219,9 +207,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
         Navigator.pop(context);
       }
     } on TimeoutException catch (_) {
-      // Firestore's offline queue would otherwise keep this write pending
-      // silently forever when there's no/slow internet, leaving the button
-      // stuck on its loading spinner with no feedback to the customer.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -259,8 +244,8 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
               SliverAppBar(
                 expandedHeight: 260,
                 pinned: true,
-                backgroundColor: primary,
-                iconTheme: const IconThemeData(color: Colors.white),
+                backgroundColor: themeColor,
+                iconTheme: const IconThemeData(color: Colors.black),
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildImage(widget.item.imageUrl),
                 ),
@@ -288,7 +273,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                 style: const TextStyle(
                                   fontSize: 24,
                                   fontWeight: FontWeight.w900,
-                                  color: Colors.black87,
+                                  color: Colors.black,
                                 ),
                               ),
                             ),
@@ -297,7 +282,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                               style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w900,
-                                color: primary,
+                                color: themeColor,
                               ),
                             ),
                           ],
@@ -337,18 +322,18 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                     ),
                                     decoration: BoxDecoration(
                                       color: isSelected
-                                          ? primary
-                                          : Colors.white,
+                                          ? themeColor
+                                          : cardColor,
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
                                         color: isSelected
-                                            ? primary
+                                            ? themeColor
                                             : Colors.grey.shade300,
                                       ),
                                       boxShadow: isSelected
                                           ? [
                                               BoxShadow(
-                                                color: primary.withAlpha(60),
+                                                color: themeColor.withAlpha(60),
                                                 blurRadius: 6,
                                                 offset: const Offset(0, 2),
                                               ),
@@ -358,7 +343,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                     child: Column(
                                       children: [
                                         Text(
-                                          _formatSizeLabel(sizeKey), // 🟢 fix
+                                          _formatSizeLabel(sizeKey),
                                           style: TextStyle(
                                             color: isSelected
                                                 ? Colors.white
@@ -373,7 +358,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                           style: TextStyle(
                                             color: isSelected
                                                 ? Colors.white70
-                                                : Colors.grey[500],
+                                                : Colors.grey[600],
                                             fontSize: 12,
                                           ),
                                         ),
@@ -416,13 +401,11 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                       vertical: 12,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: selected
-                                          ? const Color(0xFFFFF3F3)
-                                          : Colors.white,
+                                      color: selected ? lightMaroon : cardColor,
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
                                         color: selected
-                                            ? primary
+                                            ? themeColor
                                             : Colors.grey.shade200,
                                       ),
                                     ),
@@ -434,11 +417,11 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                           decoration: BoxDecoration(
                                             shape: BoxShape.circle,
                                             color: selected
-                                                ? primary
-                                                : Colors.white,
+                                                ? themeColor
+                                                : cardColor,
                                             border: Border.all(
                                               color: selected
-                                                  ? primary
+                                                  ? themeColor
                                                   : Colors.grey.shade400,
                                               width: 1.5,
                                             ),
@@ -470,7 +453,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                             fontSize: 14,
                                             fontWeight: FontWeight.w700,
                                             color: selected
-                                                ? primary
+                                                ? themeColor
                                                 : Colors.grey[600],
                                           ),
                                         ),
@@ -505,9 +488,9 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                 color: Colors.white,
                 boxShadow: [
                   BoxShadow(
-                    color: Color.fromRGBO(0, 0, 0, 0.1),
-                    blurRadius: 12,
-                    offset: Offset(0, -4),
+                    color: Colors.black12,
+                    blurRadius: 10,
+                    offset: Offset(0, -2),
                   ),
                 ],
               ),
@@ -526,7 +509,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                         style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.w900,
-                          color: primary,
+                          color: themeColor,
                         ),
                       ),
                     ],
@@ -534,14 +517,14 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: SizedBox(
-                      height: 50,
+                      height: 48,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: primary,
+                          backgroundColor: themeColor,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          elevation: 3,
+                          elevation: 0,
                         ),
                         onPressed: isAddingToCart ? null : _addToCart,
                         child: isAddingToCart
@@ -557,9 +540,8 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                 'ADD TO CART',
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.bold,
                                   color: Colors.white,
-                                  letterSpacing: 1,
                                 ),
                               ),
                       ),
@@ -585,9 +567,9 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   }
 
   Widget _placeholder() => Container(
-    color: const Color(0xFFFFF3E0),
+    color: lightMaroon,
     child: const Center(
-      child: Icon(Icons.fastfood_rounded, size: 80, color: primary),
+      child: Icon(Icons.fastfood_rounded, size: 80, color: themeColor),
     ),
   );
 
@@ -597,14 +579,10 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
         boxShadow: const [
-          BoxShadow(
-            color: Color.fromRGBO(0, 0, 0, 0.05),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
         ],
       ),
       child: Column(
@@ -638,14 +616,14 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
           alignment: Alignment.center,
           decoration: BoxDecoration(
             border: Border.symmetric(
-              horizontal: BorderSide(color: primary.withValues(alpha: 0.4)),
+              horizontal: BorderSide(color: Colors.grey.shade300),
             ),
           ),
           child: Text(
             "$quantity",
             style: const TextStyle(
               color: Colors.black,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w600,
               fontSize: 16,
             ),
           ),
@@ -663,12 +641,12 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
         height: 38,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          border: Border.all(color: primary.withValues(alpha: 0.4)),
+          border: Border.all(color: Colors.grey.shade300),
         ),
         child: Text(
           label,
           style: const TextStyle(
-            color: primary,
+            color: themeColor,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),

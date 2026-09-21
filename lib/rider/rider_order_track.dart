@@ -8,12 +8,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'rider_logic.dart';
 
-/// Rider-facing order tracking screen: a map on top showing the
-/// customer's delivery location (and the rider's current position),
-/// an info banner explaining what the status buttons do, three status
-/// buttons — Picked Up, On the Way, Delivered — for advancing the
-/// order step by step, and a bottom nav bar matching RiderHomeScreen's
-/// so the app shell feels consistent across screens.
+
 class OrderTrackingScreen extends StatefulWidget {
   final String orderId;
   final String customerName;
@@ -37,11 +32,12 @@ class OrderTrackingScreen extends StatefulWidget {
 }
 
 class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
-  static const primary = Color(0xFFA62600);
+  
+  static const primary = Color(0xFFA70000); 
   static const creamText = Color(0xFFFEF9E7);
-  static const bg = Color(0xFFFFFDF0);
+  static const bg = Colors.white; 
   static const bannerBg = Color(0xFFFFF6DA);
-  static const orangeAccent = Color(0xFFFFA733);
+  static const orangeAccent = Color(0xFFFF8A00); 
 
   GoogleMapController? _mapController;
   LatLng? _riderLatLng;
@@ -53,7 +49,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   // 👈 Google Directions API key — must have the "Directions API" enabled
   // on the same Google Cloud project as your Maps API key. Put your real
   // key here (can reuse the Maps key if Directions API is enabled on it).
-  static const String _directionsApiKey = 'AIzaSyDDTpx9ZaDEsDzGIOnrsWLQL3vHKz7DZU4';
+  static const String _directionsApiKey =
+      'AIzaSyDDTpx9ZaDEsDzGIOnrsWLQL3vHKz7DZU4';
 
   // Same sequence used elsewhere in the app — keep in sync with
   // functions/index.js STATUS_MESSAGES and rider_logic.dart's queries.
@@ -147,7 +144,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         desiredAccuracy: LocationAccuracy.high,
       );
       if (mounted) {
-        setState(() => _riderLatLng = LatLng(initialPos.latitude, initialPos.longitude));
+        setState(
+          () =>
+              _riderLatLng = LatLng(initialPos.latitude, initialPos.longitude),
+        );
         WidgetsBinding.instance.addPostFrameCallback((_) => _fitPinsOnScreen());
         _fetchRoute();
       }
@@ -155,16 +155,17 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
       // Live stream — distanceFilter: 3 means it fires roughly every time
       // the rider moves ~3 meters, which in practice ends up being every
       // couple of seconds while actually riding, giving smooth movement.
-      _positionStreamSub = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 3,
-        ),
-      ).listen((Position pos) {
-        if (!mounted) return;
-        setState(() => _riderLatLng = LatLng(pos.latitude, pos.longitude));
-        _fetchRoute(); // internally throttled — only calls API if moved 30m+
-      });
+      _positionStreamSub =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 3,
+            ),
+          ).listen((Position pos) {
+            if (!mounted) return;
+            setState(() => _riderLatLng = LatLng(pos.latitude, pos.longitude));
+            _fetchRoute(); // internally throttled — only calls API if moved 30m+
+          });
     } catch (e) {
       debugPrint('Error starting live location: $e');
       // Map still works fine with just the customer marker if this fails.
@@ -182,7 +183,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   // Google Maps app), then decodes it into a list of LatLng points to
   // draw as a Polyline on the map.
   Future<void> _fetchRoute() async {
-    final hasCustomerLoc = widget.customerLat != null && widget.customerLng != null;
+    final hasCustomerLoc =
+        widget.customerLat != null && widget.customerLng != null;
     if (_riderLatLng == null || !hasCustomerLoc) return;
 
     // Skip re-fetching if the rider has barely moved since the last route
@@ -269,7 +271,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   void _fitPinsOnScreen() {
     if (_mapController == null || _riderLatLng == null) return;
 
-    final hasCustomerLoc = widget.customerLat != null && widget.customerLng != null;
+    final hasCustomerLoc =
+        widget.customerLat != null && widget.customerLng != null;
     if (!hasCustomerLoc) {
       // Only the rider's own location is known — just center on that.
       _mapController!.animateCamera(
@@ -322,9 +325,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
         backgroundColor: primary,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
 
@@ -354,7 +355,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
           // full solid color once it's active or already done — no
           // separate green "done" tint, as requested.
           backgroundColor: isReachable ? color : color.withValues(alpha: 0.35),
-          disabledBackgroundColor: isReachable ? color : color.withValues(alpha: 0.35),
+          disabledBackgroundColor: isReachable
+              ? color
+              : color.withValues(alpha: 0.35),
           padding: const EdgeInsets.symmetric(vertical: 16),
           elevation: isActive ? 3 : 0,
           shape: RoundedRectangleBorder(
@@ -376,7 +379,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final hasCustomerLoc = widget.customerLat != null && widget.customerLng != null;
+    final hasCustomerLoc =
+        widget.customerLat != null && widget.customerLng != null;
     final customerLatLng = hasCustomerLoc
         ? LatLng(widget.customerLat!, widget.customerLng!)
         : const LatLng(33.6844, 73.0479); // fallback if coords missing
@@ -470,7 +474,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                     Container(
                       width: double.infinity,
                       margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
-                      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 10,
+                        horizontal: 14,
+                      ),
                       decoration: BoxDecoration(
                         color: bannerBg,
                         borderRadius: BorderRadius.circular(14),

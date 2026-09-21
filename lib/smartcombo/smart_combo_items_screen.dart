@@ -23,8 +23,8 @@ class SmartComboItemsScreen extends StatefulWidget {
 class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
   // ── Theme Colors (Maroon — matches app) ─────────────────────────
   static const Color primary = Color(0xFFA70000);
-  static const Color bgColor = Color(0xFFFCF8DD);
-  static const Color lightMaroon = Color(0xFFFFF3F1);
+  static const Color bgColor = Colors.white;
+  static const Color lightMaroon = Color(0x33A70000);
 
   double dealDiscountPercentage = 0.0;
   bool isLoadingDiscount = true;

@@ -8,7 +8,7 @@ import 'notification_service.dart';
 class NotificationScreen extends StatelessWidget {
   const NotificationScreen({super.key});
 
-  static const primaryColor = Color(0xFFA62600); // App's standard maroon theme
+  static const primaryColor = Color(0xFFA70000); // App's standard maroon theme
 
   @override
   Widget build(BuildContext context) {
@@ -21,9 +21,7 @@ class NotificationScreen extends StatelessWidget {
     final accountCreatedAt = currentUser?.metadata.creationTime;
 
     return Scaffold(
-      backgroundColor: const Color(
-        0xFFFEF9E7,
-      ), // HomeScreen ka matching background
+      backgroundColor: Colors.white, // Matches Order Detail/History background
       appBar: AppBar(
         title: const Text(
           'Notifications',
@@ -167,7 +165,7 @@ class NotificationScreen extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        color: const Color(0xFFFFFFF0),
+                        color: const Color(0xFFFFFDFA),
                         elevation: isRead ? 1 : 3,
                         child: ListTile(
                           leading: CircleAvatar(
@@ -271,7 +269,7 @@ class NotificationScreen extends StatelessWidget {
   // "Delete" here always means: hide from this customer's own list.
   // The Firestore document itself is never removed.
 
-  static const _cardWhite = Color(0xFFFFFFF0);
+  static const _cardWhite = Color(0xFFFFFDFA);
 
   // Pakistani-style date/time: DD/MM/YYYY (day before month, not the
   // US MM/DD/YYYY order) with a 12-hour clock + AM/PM, e.g.
