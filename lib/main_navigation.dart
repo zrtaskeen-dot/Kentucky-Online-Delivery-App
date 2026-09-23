@@ -43,7 +43,7 @@ class _MainScreenState extends State<MainScreen> {
         border: Border.all(color: _cream, width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: _orange.withOpacity(0.5),
+            color: _orange.withValues(alpha: 0.5),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -55,7 +55,7 @@ class _MainScreenState extends State<MainScreen> {
 
   // Normal icon design — soft cream so it stays readable on the maroon bar
   Widget unselectedIcon(IconData icon) {
-    return Icon(icon, color: _cream.withOpacity(0.75), size: 22);
+    return Icon(icon, color: _cream.withValues(alpha: 0.75), size: 22);
   }
 
   // Notification icon (selected or not) with an unread-count badge.
@@ -152,7 +152,7 @@ class _MainScreenState extends State<MainScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: _maroon.withOpacity(0.3),
+              color: _maroon.withValues(alpha: 0.3),
               blurRadius: 16,
               offset: const Offset(0, -4),
             ),
@@ -177,7 +177,7 @@ class _MainScreenState extends State<MainScreen> {
               elevation: 0,
 
               selectedItemColor: _orange,
-              unselectedItemColor: _cream.withOpacity(0.75),
+              unselectedItemColor: _cream.withValues(alpha: 0.75),
 
               showSelectedLabels: false,
               showUnselectedLabels: false,

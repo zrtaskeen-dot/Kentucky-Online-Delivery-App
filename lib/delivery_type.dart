@@ -295,7 +295,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               top: 10,
               right: 10,
               child: CircleAvatar(
-                backgroundColor: Colors.black.withOpacity(0.6),
+                backgroundColor: Colors.black.withValues(alpha: 0.6),
                 child: IconButton(
                   icon: const Icon(Icons.close, color: Colors.white),
                   onPressed: () => Navigator.pop(context),
@@ -681,8 +681,8 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: isSelected
-                  ? primary.withOpacity(0.15)
-                  : primary.withOpacity(0.05),
+                  ? primary.withValues(alpha: 0.15)
+                  : primary.withValues(alpha: 0.05),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: primary, size: 20),
@@ -815,7 +815,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               decoration: BoxDecoration(
                 color: bgColor,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: primary.withOpacity(0.2)),
+                border: Border.all(color: primary.withValues(alpha: 0.2)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -825,7 +825,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                       Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: primary.withOpacity(0.12),
+                          color: primary.withValues(alpha: 0.12),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -900,7 +900,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
         decoration: BoxDecoration(
-          color: isSet ? primary.withOpacity(0.06) : fieldBg,
+          color: isSet ? primary.withValues(alpha: 0.06) : fieldBg,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: isSet ? primary : Colors.black12,
@@ -1059,7 +1059,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       decoration: BoxDecoration(
         color: fieldBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: primary.withOpacity(0.3)),
+        border: Border.all(color: primary.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1086,7 +1086,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: primary.withOpacity(0.1),
+                    color: primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: const Row(
@@ -1137,7 +1137,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       decoration: BoxDecoration(
         color: fieldBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: primary.withOpacity(0.3)),
+        border: Border.all(color: primary.withValues(alpha: 0.3)),
       ),
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1210,9 +1210,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       height: 140,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: primary.withOpacity(0.04),
+        color: primary.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: primary.withOpacity(0.4), width: 1.5),
+        border: Border.all(color: primary.withValues(alpha: 0.4), width: 1.5),
       ),
       child: _isVerifyingImage
           ? const Column(
@@ -1243,7 +1243,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: primary.withOpacity(0.1),
+                    color: primary.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -1282,7 +1282,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: primary.withOpacity(0.3), width: 1.5),
+              border: Border.all(color: primary.withValues(alpha: 0.3), width: 1.5),
             ),
             child: Stack(
               fit: StackFit.expand,
@@ -1313,7 +1313,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.6),
+                      color: Colors.black.withValues(alpha: 0.6),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: const Row(

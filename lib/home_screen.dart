@@ -145,7 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
       isSearching = query.isNotEmpty;
       if (isSearching) {
         searchResults = allItems
-            .where((item) => item.name.toLowerCase().contains(query))
+            .where((item) => item.name.toLowerCase().startsWith(query))
             .toList();
       } else {
         searchResults = [];
@@ -155,6 +155,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _initializeData() async {
     await _fetchBranches();
+  }
+
+  double _readDeliveryCharge(Map<String, dynamic> branchData) {
+    final raw = branchData['deliveryCharge'];
+    if (raw is num) return raw.toDouble();
+    return double.tryParse(raw?.toString() ?? '') ?? 50;
   }
 
   String _normalizeCategory(String raw) {
@@ -249,7 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final activeBranch = branchesList.firstWhere(
         (d) => d.id == finalBranchId,
       );
-      final branchData = activeBranch.data() as Map<String, dynamic>;
+      final branchData = activeBranch.data();
 
       setState(() {
         selectedBranchId = finalBranchId;
@@ -259,10 +265,9 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       if (mounted) {
-        Provider.of<CartProvider>(
-          context,
-          listen: false,
-        ).setBranchId(finalBranchId);
+        final cartProvider = Provider.of<CartProvider>(context, listen: false);
+        cartProvider.setBranchId(finalBranchId);
+        cartProvider.setDeliveryCharge(_readDeliveryCharge(branchData));
       }
 
       await _fetchMenuItems(finalBranchId);
@@ -303,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (newId == selectedBranchId) return;
 
     final doc = branchesList.firstWhere((d) => d.id == newId);
-    final data = doc.data() as Map<String, dynamic>;
+    final data = doc.data();
 
     setState(() {
       selectedBranchId = newId;
@@ -312,7 +317,9 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     if (mounted) {
-      Provider.of<CartProvider>(context, listen: false).setBranchId(newId);
+      final cartProvider = Provider.of<CartProvider>(context, listen: false);
+      cartProvider.setBranchId(newId);
+      cartProvider.setDeliveryCharge(_readDeliveryCharge(data));
     }
 
     final user = FirebaseAuth.instance.currentUser;
@@ -489,7 +496,7 @@ class _HomeScreenState extends State<HomeScreen> {
       (d) => d.id == safeDropdownValue,
       orElse: () => branchesList.first,
     );
-    final currentData = currentDoc.data() as Map<String, dynamic>;
+    final currentData = currentDoc.data();
     final currentName = (currentData['branchName'] ?? 'Branch')
         .toString()
         .toUpperCase();
@@ -518,7 +525,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: primary.withOpacity(0.1),
+                color: primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
@@ -617,7 +624,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       separatorBuilder: (_, __) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
                         final doc = branchesList[index];
-                        final data = doc.data() as Map<String, dynamic>;
+                        final data = doc.data();
                         final name = (data['branchName'] ?? 'Branch')
                             .toString();
                         final address =
@@ -638,7 +645,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? primary.withOpacity(0.08)
+                                  ? primary.withValues(alpha: 0.08)
                                   : itemCardColor,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
@@ -653,7 +660,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? primary
-                                        : primary.withOpacity(0.1),
+                                        : primary.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Icon(
@@ -894,7 +901,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 boxShadow: isSelected
                     ? [
                         BoxShadow(
-                          color: maroon.withOpacity(0.35),
+                          color: maroon.withValues(alpha: 0.35),
                           blurRadius: 8,
                           offset: const Offset(0, 3),
                         ),
@@ -1080,7 +1087,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(8),
                     boxShadow: [
                       BoxShadow(
-                        color: maroon.withOpacity(0.3),
+                        color: maroon.withValues(alpha: 0.3),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),
@@ -1153,7 +1160,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Icon(
               Icons.restaurant_menu_rounded,
               size: 48,
-              color: primary.withOpacity(0.4),
+              color: primary.withValues(alpha: 0.4),
             ),
             const SizedBox(height: 12),
             Text(

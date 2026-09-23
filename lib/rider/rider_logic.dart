@@ -29,8 +29,10 @@ class RiderController extends ChangeNotifier {
       case 'Accepted':
         String riderName = 'A rider';
         if (riderId != null && riderId.isNotEmpty) {
-          final riderDoc =
-              await FirebaseFirestore.instance.collection('users').doc(riderId).get();
+          final riderDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(riderId)
+              .get();
           riderName = riderDoc.data()?['name'] ?? riderName;
         }
         body = '$riderName has accepted your order and will pick it up soon.';
@@ -72,7 +74,7 @@ class RiderController extends ChangeNotifier {
   Stream<QuerySnapshot> getPendingOrders(String riderId) {
     return FirebaseFirestore.instance
         .collection('orders')
-        .where('order_status', isEqualTo: 'Pending')
+        .where('orderStatus', isEqualTo: 'Pending')
         .snapshots();
   }
 
@@ -81,7 +83,10 @@ class RiderController extends ChangeNotifier {
     return FirebaseFirestore.instance
         .collection('orders')
         .where('riderId', isEqualTo: riderId)
-        .where('order_status', whereIn: ['Accepted', 'Delivery Started', 'Picked Up', 'On the Way'])
+        .where(
+          'orderStatus',
+          whereIn: ['Accepted', 'Delivery Started', 'Picked Up', 'On the Way'],
+        )
         .snapshots();
   }
 
@@ -118,7 +123,7 @@ class RiderController extends ChangeNotifier {
           .collection('orders')
           .doc(orderId)
           .update({
-            'order_status': 'Accepted',
+            'orderStatus': 'Accepted',
             'riderId': riderId,
             'acceptedAt': FieldValue.serverTimestamp(),
           });
@@ -134,7 +139,7 @@ class RiderController extends ChangeNotifier {
       return true;
     } catch (e) {
       _setError(e.toString());
-      debugPrint( 'Error accepting order: $e');
+      debugPrint('Error accepting order: $e');
       _setLoading(false);
       return false;
     }
@@ -156,7 +161,9 @@ class RiderController extends ChangeNotifier {
     _setLoading(true);
     _setError('');
     try {
-      final orderRef = FirebaseFirestore.instance.collection('orders').doc(orderId);
+      final orderRef = FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId);
 
       // Read first so we know the riderId/customerId before writing.
       final orderSnap = await orderRef.get();
@@ -177,12 +184,13 @@ class RiderController extends ChangeNotifier {
             .collection('orders')
             .where('riderId', isEqualTo: riderId)
             .where(
-              'order_status',
+              'orderStatus',
               whereIn: ['Delivery Started', 'Picked Up', 'On the Way'],
             )
             .get();
-        final hasOtherActiveDelivery =
-            activeSnap.docs.any((d) => d.id != orderId);
+        final hasOtherActiveDelivery = activeSnap.docs.any(
+          (d) => d.id != orderId,
+        );
 
         if (hasOtherActiveDelivery) {
           _setError(
@@ -194,7 +202,7 @@ class RiderController extends ChangeNotifier {
       }
 
       await orderRef.update({
-        'order_status': newStatus,
+        'orderStatus': newStatus,
         'statusUpdatedAt': FieldValue.serverTimestamp(),
       });
 
@@ -203,8 +211,10 @@ class RiderController extends ChangeNotifier {
       // confirmation. Awaiting this before returning was what caused a
       // noticeable delay before the "Order marked as ..." message
       // appeared on screen.
-      _notifyCustomerOfStatus(customerId: customerId, status: newStatus)
-          .catchError((e) => debugPrint('Error notifying customer: $e'));
+      _notifyCustomerOfStatus(
+        customerId: customerId,
+        status: newStatus,
+      ).catchError((e) => debugPrint('Error notifying customer: $e'));
 
       if (newStatus == 'Picked Up') {
         // Rider has the food in hand now — begin GPS tracking.

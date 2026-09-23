@@ -411,7 +411,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
             .snapshots(),
         builder: (context, snapshot) {
           final data = snapshot.data?.data() as Map<String, dynamic>?;
-          final currentStatus = data?['order_status']?.toString() ?? 'Accepted';
+          final currentStatus =
+              (data?['orderStatus'] ?? data?['order_status'])?.toString() ??
+              'Accepted';
           final rawIndex = _statusSequence.indexOf(currentStatus);
           final currentIndex = rawIndex == -1 ? 0 : rawIndex;
 

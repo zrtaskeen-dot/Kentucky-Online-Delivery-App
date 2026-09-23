@@ -203,14 +203,14 @@ class OrderHistoryScreen extends StatelessWidget {
           }).toList();
 
           final activeDocs = allDocs.where((doc) {
-            final status = (doc.data()['order_status'] ?? '')
+            final status = (doc.data()['orderStatus'] ?? '')
                 .toString()
                 .toLowerCase();
             return !_pastStatuses.contains(status);
           }).toList();
 
           final pastDocs = allDocs.where((doc) {
-            final status = (doc.data()['order_status'] ?? '')
+            final status = (doc.data()['orderStatus'] ?? '')
                 .toString()
                 .toLowerCase();
             return _pastStatuses.contains(status);
@@ -423,7 +423,9 @@ class _OrderCard extends StatelessWidget {
   double get _total => _computeOrderTotal(data, _items);
 
   String get _status =>
-      (data['order_status'] ?? 'pending').toString().toLowerCase();
+      (data['orderStatus'] ?? data['order_status'] ?? 'pending')
+          .toString()
+          .toLowerCase();
 
   String get _dateLabel {
     final ts = data['createdAt'] ?? data['order_date'];
@@ -435,10 +437,10 @@ class _OrderCard extends StatelessWidget {
   }
 
   String get _deliveryTime =>
-      (data['delivery_time'] ?? data['deliveryTime'] ?? '—').toString();
+      (data['deliveryTime'] ?? data['delivery_time'] ?? '—').toString();
 
   String get _paymentMethod =>
-      (data['payment_method'] ?? data['paymentMethod'] ?? '—').toString();
+      (data['paymentMethod'] ?? data['payment_method'] ?? '—').toString();
 
   // Delivery screen sets this to "Standard Delivery" for immediate
   // orders, and a formatted date/time string for scheduled orders.

@@ -1,17 +1,23 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:latlong2/latlong.dart' as latlong;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import 'cart_provider.dart';
 import 'delivery_type.dart';
-import 'location_picker.dart';
 
-// Capitalizes the first letter of every word as the user types, and
-// lower-cases the rest of that word (so "ALI" -> "Ali", "aLi" -> "Ali").
-// Keeps the cursor exactly where it was, including mid-word edits.
+// NOTE: `latlong2`'s LatLng is kept only because DeliveryScreen (and other
+// downstream screens not shown here) expect `selectedLocation` in that
+// type. All actual map rendering, search, and geocoding now goes through
+// google_maps_flutter / Google's HTTP APIs — see _toGmaps/_fromGmaps below.
+
 class CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -26,7 +32,6 @@ class CapitalizeWordsFormatter extends TextInputFormatter {
     for (int i = 0; i < newValue.text.length; i++) {
       final ch = newValue.text[i];
       if (ch.trim().isEmpty) {
-        // whitespace — reset so the next letter typed is capitalized
         buffer.write(ch);
         capitalizeNext = true;
       } else if (capitalizeNext) {
@@ -42,6 +47,13 @@ class CapitalizeWordsFormatter extends TextInputFormatter {
       selection: newValue.selection,
     );
   }
+}
+
+class _PlaceSuggestion {
+  final String description;
+  final String placeId;
+
+  _PlaceSuggestion({required this.description, required this.placeId});
 }
 
 class CheckoutScreen extends StatefulWidget {
@@ -63,35 +75,89 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutLocationScreenState extends State<CheckoutScreen> {
+  // Replace with your real key, ideally loaded from --dart-define rather
+  // than hardcoded here.
+  //
+  // IMPORTANT: this key is used for raw REST calls (Places Autocomplete,
+  // Place Details, Geocoding) below via http.get — NOT through the native
+  // Maps SDK. If this key has an "Android apps" or "iOS apps" application
+  // restriction in Google Cloud Console, these REST calls will silently
+  // get REQUEST_DENIED: that restriction only works for requests made by
+  // the native SDK (which attaches special headers), not for a plain
+  // http.get from Dart. Either use a separate key with no app restriction
+  // (or restrict it by API instead) for these calls, or keep this one
+  // restriction-free, and make sure Places API + Geocoding API are both
+  // enabled for it — see _decodeGoogleResponse below, which now logs the
+  // real reason whenever Google rejects a request.
+  static const String _googleApiKey = 'AIzaSyDDTpx9ZaDEsDzGIOnrsWLQL3vHKz7DZU4';
+
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _addressCtrl = TextEditingController();
+  final _addressFocus = FocusNode();
 
-  // 👈 FIXED: this is now latlong2's LatLng (same type LocationPickerScreen
-  // and DeliveryScreen use), instead of google_maps_flutter's LatLng.
-  // Those were two different classes with the same name, which caused a
-  // type-mismatch error when passing _pinLatLng into LocationPickerScreen.
+  // Search bar that sits on top of the map. Fully separate from
+  // _addressCtrl — this is the only place suggestions/loading show up.
+  final _searchCtrl = TextEditingController();
+  final _searchFocus = FocusNode();
+  List<_PlaceSuggestion> _suggestions = [];
+  bool _searchingSuggestions = false;
+  Timer? _debounce;
+  String _sessionToken = '';
+
+  gmaps.GoogleMapController? _mapController;
+
   LatLng _pinLatLng = const LatLng(33.6844, 73.0479); // Default: Islamabad
+
+  gmaps.LatLng _toGmaps(LatLng p) => gmaps.LatLng(p.latitude, p.longitude);
+  LatLng _fromGmaps(gmaps.LatLng p) => LatLng(p.latitude, p.longitude);
   bool _saveInfoForNextTime = false;
   bool _locationLoading = true;
+  bool _fetchingCurrentLocation = false;
+  bool _isInZone = true;
 
-  // ────────────────────────────────────────────────────────────
-  // 🗺️ DELIVERY ZONE BOUNDARY (Cantt area) — RECTANGLE CORNERS
-  // Kept here too (in addition to LocationPickerScreen) purely as a
-  // final safety check before Proceed — the picker itself already
-  // blocks confirming a location outside this rectangle.
-  // ────────────────────────────────────────────────────────────
   static const LatLng _zoneSouthWest = LatLng(33.7377237, 72.7183126);
   static const LatLng _zoneNorthEast = LatLng(33.8020805, 72.79845700000001);
 
-  bool _isInZone = true;
+  static const bgColor = Colors.white;
+  static const primary = Color(0xFFA70000);
+  static const creamText = Colors.white;
+  static const fieldBg = Color(0xFFFFFDFA);
 
   bool _isWithinDeliveryZone(LatLng point) {
     return point.latitude >= _zoneSouthWest.latitude &&
         point.latitude <= _zoneNorthEast.latitude &&
         point.longitude >= _zoneSouthWest.longitude &&
         point.longitude <= _zoneNorthEast.longitude;
+  }
+
+  // Center + radius of the delivery zone, used to hard-restrict place
+  // search (autocomplete) results to only the Cantt area instead of just
+  // "biasing" toward it. Computed once from the existing zone bounds.
+  static final LatLng _zoneCenter = LatLng(
+    (_zoneSouthWest.latitude + _zoneNorthEast.latitude) / 2,
+    (_zoneSouthWest.longitude + _zoneNorthEast.longitude) / 2,
+  );
+
+  static final double _zoneRadiusMeters = _distanceMeters(
+    _zoneCenter,
+    _zoneNorthEast,
+  );
+
+  static double _distanceMeters(LatLng a, LatLng b) {
+    const earthRadius = 6371000.0;
+    final dLat = (b.latitude - a.latitude) * math.pi / 180;
+    final dLng = (b.longitude - a.longitude) * math.pi / 180;
+    final lat1 = a.latitude * math.pi / 180;
+    final lat2 = b.latitude * math.pi / 180;
+    final h =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1) *
+            math.cos(lat2) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2);
+    return earthRadius * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
   }
 
   void _checkZone() {
@@ -101,8 +167,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // ---- keys are scoped per logged-in user (uid), so a new account on
-  // the same phone never sees a previous account's saved info.
   String get _uid =>
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
@@ -110,31 +174,88 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   String get _kFirstName => 'checkout_first_name_$_uid';
   String get _kLastName => 'checkout_last_name_$_uid';
   String get _kPhone => 'checkout_phone_$_uid';
-
-  static const bgColor = Colors.white;
-  static const primary = Color(0xFFA70000);
-  static const creamText = Colors.white;
-  static const fieldBg = Color(0xFFFFFDFA);
+  String get _kAddress => 'checkout_address_$_uid';
+  String get _kLat => 'checkout_lat_$_uid';
+  String get _kLng => 'checkout_lng_$_uid';
 
   @override
   void initState() {
     super.initState();
+    _newSessionToken();
     _loadSavedInfo();
-    _loadSavedLocation();
+    _searchCtrl.addListener(_onSearchChanged);
   }
 
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.removeListener(_onSearchChanged);
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _addressCtrl.dispose();
+    _addressFocus.dispose();
+    _searchCtrl.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  void _newSessionToken() {
+    _sessionToken = DateTime.now().microsecondsSinceEpoch.toString();
+  }
+
+  // Every Google Maps REST response is HTTP 200 even when the request was
+  // rejected — the actual outcome is in the "status" field. Both reported
+  // bugs (no suggestions, no address on tap) came from that status never
+  // being checked, so a REQUEST_DENIED/INVALID_REQUEST looked identical to
+  // "no results." This surfaces it instead of swallowing it.
+  Map<String, dynamic> _decodeGoogleResponse(http.Response response) {
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final status = data['status'] as String?;
+    if (status != null && status != 'OK' && status != 'ZERO_RESULTS') {
+      debugPrint(
+        'Google Maps API error ($status): '
+        '${data['error_message'] ?? 'no error_message in response'}. '
+        'Check that Places API and Geocoding API are both enabled for '
+        '_googleApiKey, and that the key has no Android/iOS app '
+        'restriction (see the comment on _googleApiKey above).',
+      );
+    }
+    return data;
+  }
+
+  // Delivery location is no longer persisted to its own Firestore
+  // collection. It only ever gets written to Firestore once, as part of
+  // the order document itself (see FirestoreService.saveOrder). For the
+  // "remember this for next time" convenience we reuse the same
+  // SharedPreferences mechanism as the name/phone fields.
   Future<void> _loadSavedInfo() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getBool(_kSaveFlag) ?? false;
 
     if (saved) {
+      final lat = prefs.getDouble(_kLat);
+      final lng = prefs.getDouble(_kLng);
+      final address = prefs.getString(_kAddress);
+
       setState(() {
         _saveInfoForNextTime = true;
         _firstNameCtrl.text = prefs.getString(_kFirstName) ?? '';
         _lastNameCtrl.text = prefs.getString(_kLastName) ?? '';
         _phoneCtrl.text = prefs.getString(_kPhone) ?? '';
+
+        if (lat != null &&
+            lng != null &&
+            address != null &&
+            address.trim().isNotEmpty) {
+          _pinLatLng = LatLng(lat, lng);
+          _setAddressSilently(address);
+        }
       });
+      _checkZone();
     }
+
+    setState(() => _locationLoading = false);
   }
 
   Future<void> _persistInfoIfNeeded() async {
@@ -145,126 +266,360 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       await prefs.setString(_kFirstName, _firstNameCtrl.text.trim());
       await prefs.setString(_kLastName, _lastNameCtrl.text.trim());
       await prefs.setString(_kPhone, _phoneCtrl.text.trim());
+      await prefs.setString(_kAddress, _addressCtrl.text.trim());
+      await prefs.setDouble(_kLat, _pinLatLng.latitude);
+      await prefs.setDouble(_kLng, _pinLatLng.longitude);
     } else {
       await prefs.setBool(_kSaveFlag, false);
       await prefs.remove(_kFirstName);
       await prefs.remove(_kLastName);
       await prefs.remove(_kPhone);
+      await prefs.remove(_kAddress);
+      await prefs.remove(_kLat);
+      await prefs.remove(_kLng);
     }
   }
 
-  // ────────────────────────────────────────────────────────────
-  // 📍 DELIVERY LOCATION — now backed by Firestore instead of the old
-  // in-screen Places search (which was failing). The full picker UI
-  // lives in LocationPickerScreen; this screen just shows the result
-  // and remembers it.
-  // ────────────────────────────────────────────────────────────
+  void _setAddressSilently(String address) {
+    if (!mounted) return;
+    setState(() => _addressCtrl.text = address);
+  }
 
-  Future<void> _loadSavedLocation() async {
+  void _onSearchChanged() {
+    _debounce?.cancel();
+
+    final query = _searchCtrl.text.trim();
+    if (query.isEmpty) {
+      setState(() => _suggestions = []);
+      return;
+    }
+
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      _fetchSuggestions(query);
+    });
+  }
+
+  // Two parallel autocomplete calls: `establishment` surfaces named
+  // places (shops, restaurants, landmarks) which usually resolve to a
+  // precise pin, while `geocode` still covers plain street addresses
+  // that `establishment` alone would drop. Results are merged and
+  // de-duplicated by place_id, establishments listed first so the more
+  // precise matches show up before generic road/area results.
+  Future<void> _fetchSuggestions(String query) async {
+    setState(() => _searchingSuggestions = true);
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('delivery_locations')
-          .doc(_uid)
-          .get();
+      final baseParams = {
+        'input': query,
+        'key': _googleApiKey,
+        'sessiontoken': _sessionToken,
+        'location': '${_zoneCenter.latitude},${_zoneCenter.longitude}',
+        'radius': _zoneRadiusMeters.toStringAsFixed(0),
+        // Without this, location+radius are only a *bias* — results
+        // outside the Cantt zone still show up. strictbounds forces
+        // Google to only return results inside that circle.
+        'strictbounds': 'true',
+      };
 
-      final data = doc.data();
-      if (doc.exists && data != null) {
-        final lat = (data['latitude'] as num?)?.toDouble();
-        final lng = (data['longitude'] as num?)?.toDouble();
-        final address = data['address'] as String?;
+      final establishmentUri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/autocomplete/json',
+        {...baseParams, 'types': 'establishment'},
+      );
+      final addressUri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/autocomplete/json',
+        {...baseParams, 'types': 'geocode'},
+      );
 
-        if (lat != null &&
-            lng != null &&
-            address != null &&
-            address.trim().isNotEmpty) {
-          setState(() {
-            _pinLatLng = LatLng(lat, lng);
-            _addressCtrl.text = address;
-            _locationLoading = false;
-          });
-          _checkZone();
-          return;
+      final responses = await Future.wait([
+        http.get(establishmentUri),
+        http.get(addressUri),
+      ]);
+
+      final establishmentData = _decodeGoogleResponse(responses[0]);
+      final addressData = _decodeGoogleResponse(responses[1]);
+
+      final establishmentPredictions =
+          (establishmentData['predictions'] as List?) ?? [];
+      final addressPredictions = (addressData['predictions'] as List?) ?? [];
+
+      final seenIds = <String>{};
+      final merged = <_PlaceSuggestion>[];
+      for (final p in [...establishmentPredictions, ...addressPredictions]) {
+        final id = p['place_id'] as String;
+        if (seenIds.add(id)) {
+          merged.add(
+            _PlaceSuggestion(
+              description: p['description'] as String,
+              placeId: id,
+            ),
+          );
         }
       }
-    } catch (e) {
-      debugPrint('Failed to load saved delivery location: $e');
-    }
 
-    // No saved location yet — open the map picker right away so the
-    // customer chooses one before filling in the rest of the form.
-    setState(() => _locationLoading = false);
-    if (mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _openLocationPicker();
-      });
+      if (!mounted) return;
+      setState(() => _suggestions = merged.take(8).toList());
+    } catch (e) {
+      debugPrint('Failed to fetch address suggestions: $e');
+    } finally {
+      if (mounted) setState(() => _searchingSuggestions = false);
     }
   }
 
-  Future<void> _saveLocationToFirestore(
-    String address,
-    double lat,
-    double lng,
-  ) async {
+  // Google's Geocoding API often returns a Plus Code ("QWC+M73...") as the
+  // very first result for places without precise street-level data, which
+  // is what was showing up in the Address field. This picks the first
+  // result that ISN'T a plus code, falling back to the plus code only if
+  // that's genuinely all Google has for that spot.
+  String? _bestFormattedAddress(List results) {
+    if (results.isEmpty) return null;
+    for (final r in results) {
+      final types = (r['types'] as List?)?.cast<String>() ?? const [];
+      if (!types.contains('plus_code')) {
+        final addr = r['formatted_address'] as String?;
+        if (addr != null && addr.trim().isNotEmpty) return addr;
+      }
+    }
+    return results.first['formatted_address'] as String?;
+  }
+
+  // Triggered when the user submits the search bar (presses enter/search)
+  // without tapping one of the autocomplete suggestions — a plain
+  // forward-geocode of whatever they typed.
+  Future<void> _searchAndMoveTo(String query) async {
+    if (query.trim().isEmpty) return;
+    setState(() => _searchingSuggestions = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('delivery_locations')
-          .doc(_uid)
-          .set({
-            'address': address,
-            'latitude': lat,
-            'longitude': lng,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+        'address': query,
+        'key': _googleApiKey,
+        // Geocoding API can only "bias" toward this box, it can't hard
+        // restrict like autocomplete's strictbounds can — so we still
+        // check the result against the zone below.
+        'bounds':
+            '${_zoneSouthWest.latitude},${_zoneSouthWest.longitude}|'
+            '${_zoneNorthEast.latitude},${_zoneNorthEast.longitude}',
+      });
+
+      final response = await http.get(uri);
+      final data = _decodeGoogleResponse(response);
+      final results = (data['results'] as List?) ?? [];
+      if (results.isEmpty || !mounted) {
+        final status = data['status'] as String?;
+        if (status != null && status != 'OK' && status != 'ZERO_RESULTS') {
+          _snack('Search failed — please try again in a moment.');
+        }
+        return;
+      }
+
+      final location = results.first['geometry']['location'] as Map;
+      final lat = (location['lat'] as num).toDouble();
+      final lng = (location['lng'] as num).toDouble();
+      final address = _bestFormattedAddress(results) ?? query;
+      final point = LatLng(lat, lng);
+
+      if (!_isWithinDeliveryZone(point)) {
+        _snack('That address is outside our delivery zone (Cantt area).');
+        return;
+      }
+
+      _movePin(point, address: address);
+      _searchCtrl.clear();
+      _searchFocus.unfocus();
     } catch (e) {
-      debugPrint('Failed to save delivery location: $e');
+      debugPrint('Failed to geocode typed address: $e');
+    } finally {
+      if (mounted) setState(() => _searchingSuggestions = false);
     }
   }
 
-  Future<void> _openLocationPicker() async {
-    final result = await Navigator.push<PickedLocation>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LocationPickerScreen(initialLatLng: _pinLatLng),
+  // Builds the address to fill into the Address field after a suggestion
+  // is tapped. Place Details' `formatted_address` sometimes drops the
+  // place's own name (e.g. a shop/landmark name), which is what made the
+  // filled-in address look shorter/incomplete than the suggestion the
+  // user actually picked. We prepend the place `name` when it's missing
+  // from the formatted address, and fall back to the original dropdown
+  // text if Place Details still returns something shorter than that.
+  Future<void> _selectSuggestion(_PlaceSuggestion suggestion) async {
+    setState(() => _suggestions = []);
+    FocusScope.of(context).unfocus();
+
+    try {
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/details/json',
+        {
+          'place_id': suggestion.placeId,
+          'key': _googleApiKey,
+          'sessiontoken': _sessionToken,
+          // added 'name' so we can prepend the place name when
+          // formatted_address leaves it out
+          'fields': 'geometry,formatted_address,address_components,types,name',
+        },
+      );
+
+      final response = await http.get(uri);
+      final data = _decodeGoogleResponse(response);
+      final result = data['result'] as Map<String, dynamic>?;
+      final location =
+          result?['geometry']?['location'] as Map<String, dynamic>?;
+      if (location == null) return;
+
+      final lat = (location['lat'] as num).toDouble();
+      final lng = (location['lng'] as num).toDouble();
+      final types = (result?['types'] as List?)?.cast<String>() ?? const [];
+      final rawAddress = result?['formatted_address'] as String?;
+      final placeName = result?['name'] as String?;
+
+      String address;
+      if (rawAddress != null && !types.contains('plus_code')) {
+        final alreadyHasName =
+            placeName != null &&
+            rawAddress.toLowerCase().contains(placeName.toLowerCase());
+        address = (placeName != null && !alreadyHasName)
+            ? '$placeName, $rawAddress'
+            : rawAddress;
+      } else {
+        address = suggestion.description;
+      }
+
+      // Safety net: never end up with less text than what the dropdown
+      // already showed and the user tapped on.
+      if (suggestion.description.length > address.length) {
+        address = suggestion.description;
+      }
+
+      _movePin(LatLng(lat, lng), address: address);
+      _newSessionToken();
+      _searchCtrl.clear();
+    } catch (e) {
+      debugPrint('Failed to fetch place details: $e');
+    }
+  }
+
+  Future<void> _reverseGeocode(LatLng point) async {
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+        'latlng': '${point.latitude},${point.longitude}',
+        'key': _googleApiKey,
+      });
+
+      final response = await http.get(uri);
+      final data = _decodeGoogleResponse(response);
+      final results = (data['results'] as List?) ?? [];
+      if (results.isEmpty) {
+        final status = data['status'] as String?;
+        if (status != null && status != 'OK' && status != 'ZERO_RESULTS') {
+          _snack('Could not look up the address for that point.');
+        }
+        return;
+      }
+
+      final address = _bestFormattedAddress(results);
+      if (address != null) _setAddressSilently(address);
+    } catch (e) {
+      debugPrint('Failed to reverse geocode location: $e');
+    }
+  }
+
+  void _movePin(LatLng point, {String? address}) {
+    setState(() {
+      _pinLatLng = point;
+      _suggestions = [];
+    });
+    if (address != null) _setAddressSilently(address);
+    _mapController?.animateCamera(
+      gmaps.CameraUpdate.newLatLng(_toGmaps(point)),
+    );
+    _checkZone();
+  }
+
+  void _onMapTap(gmaps.LatLng gPoint) {
+    final point = _fromGmaps(gPoint);
+    setState(() => _pinLatLng = point);
+    _checkZone();
+    _reverseGeocode(point);
+  }
+
+  // "Use my current location" — always asks first, in plain language,
+  // before triggering the OS permission prompt (and again points the user
+  // to Settings if they've permanently denied it before).
+  Future<void> _useCurrentLocation() async {
+    final wantsToShare = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Use your current location?'),
+        content: const Text(
+          'We need access to your device location to set your delivery '
+          'address automatically. You can still adjust it on the map '
+          'afterwards.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Not now'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Allow'),
+          ),
+        ],
       ),
     );
+    if (wantsToShare != true || !mounted) return;
 
-    if (result == null || !mounted) return;
+    setState(() => _fetchingCurrentLocation = true);
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _snack('Please turn on Location Services to use this.');
+        return;
+      }
 
-    setState(() {
-      _pinLatLng = LatLng(result.latitude, result.longitude);
-      _addressCtrl.text = result.address;
-    });
-    _checkZone();
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
 
-    await _saveLocationToFirestore(
-      result.address,
-      result.latitude,
-      result.longitude,
-    );
-  }
+      if (permission == LocationPermission.denied) {
+        _snack('Location permission was denied.');
+        return;
+      }
+      if (permission == LocationPermission.deniedForever) {
+        _snack('Location permission is disabled. Enable it from Settings.');
+        await Geolocator.openAppSettings();
+        return;
+      }
 
-  @override
-  void dispose() {
-    _firstNameCtrl.dispose();
-    _lastNameCtrl.dispose();
-    _phoneCtrl.dispose();
-    _addressCtrl.dispose();
-    super.dispose();
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      final point = LatLng(position.latitude, position.longitude);
+      _movePin(point);
+      await _reverseGeocode(point);
+    } catch (e) {
+      debugPrint('Failed to fetch current location: $e');
+      _snack('Could not fetch your current location.');
+    } finally {
+      if (mounted) setState(() => _fetchingCurrentLocation = false);
+    }
   }
 
   void _proceedToDeliveryScreen() async {
     final firstName = _firstNameCtrl.text.trim();
     final lastName = _lastNameCtrl.text.trim();
-    final phone = _phoneCtrl.text.trim();
+    final phoneDigits = _phoneCtrl.text.trim();
     final address = _addressCtrl.text.trim();
-    final phoneRegExp = RegExp(r'^[0-9]{11}$');
+    final phoneRegExp = RegExp(r'^[0-9]{10}$');
 
     if (firstName.isEmpty || lastName.isEmpty) {
       _snack('Please enter your First and Last Name.');
       return;
     }
-    if (phone.isEmpty || !phoneRegExp.hasMatch(phone)) {
-      _snack('Phone number must be exactly 11 digits (e.g. 03001234567).');
+    if (phoneDigits.isEmpty || !phoneRegExp.hasMatch(phoneDigits)) {
+      _snack('Phone number must be exactly 10 digits (e.g. 3001234567).');
       return;
     }
     if (address.isEmpty) {
@@ -279,17 +634,15 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     await _persistInfoIfNeeded();
 
     final fullName = '$firstName $lastName';
+    final fullPhone = '+92$phoneDigits';
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => DeliveryScreen(
           userName: fullName,
-          userPhone: phone,
-          selectedLocation: latlong.LatLng(
-            _pinLatLng.latitude,
-            _pinLatLng.longitude,
-          ),
+          userPhone: fullPhone,
+          selectedLocation: LatLng(_pinLatLng.latitude, _pinLatLng.longitude),
           addressDetails: address,
           totalAmount: widget.totalAmount,
           cartItems: widget.cartItems,
@@ -330,107 +683,211 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildLocationCard(),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: _buildFormSection(),
+      // The map is a sibling of the scroll view, not a child inside it —
+      // if it were nested inside the SingleChildScrollView below, the
+      // outer scroll would keep stealing the pan/pinch gestures meant for
+      // the map, which is why zooming wasn't working before.
+      body: Column(
+        children: [
+          _buildMap(),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (!_locationLoading && !_isInZone) _buildZoneWarning(),
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: _buildFormSection(),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
       bottomNavigationBar: _buildProceedButton(),
     );
   }
 
-  Widget _buildLocationCard() {
-    final hasAddress = _addressCtrl.text.trim().isNotEmpty;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: fieldBg,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: primary.withValues(alpha: 0.15)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: primary.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.location_on_rounded,
-                color: primary,
-                size: 22,
-              ),
+  Widget _buildMap() {
+    return SizedBox(
+      height: 300,
+      child: Stack(
+        children: [
+          gmaps.GoogleMap(
+            initialCameraPosition: gmaps.CameraPosition(
+              target: _toGmaps(_pinLatLng),
+              zoom: 15,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Delivery Location',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _locationLoading
-                        ? 'Loading your saved location...'
-                        : (hasAddress
-                              ? _addressCtrl.text.trim()
-                              : 'No location selected yet'),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  if (!_locationLoading && !_isInZone) ...[
-                    const SizedBox(height: 4),
-                    const Text(
-                      'This location is outside our delivery zone.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.red,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            TextButton(
-              onPressed: _openLocationPicker,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-              ),
-              child: Text(
-                hasAddress ? 'Change' : 'Choose',
-                style: const TextStyle(
-                  color: primary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
+            onMapCreated: (controller) => _mapController = controller,
+            onTap: _onMapTap,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: true,
+            zoomGesturesEnabled: true,
+            mapToolbarEnabled: false,
+            markers: {
+              gmaps.Marker(
+                markerId: const gmaps.MarkerId('selected_pin'),
+                position: _toGmaps(_pinLatLng),
+                icon: gmaps.BitmapDescriptor.defaultMarkerWithHue(
+                  gmaps.BitmapDescriptor.hueRed,
                 ),
               ),
+            },
+          ),
+
+          // Search bar + its own suggestions list — completely separate
+          // from the Address field below.
+          Positioned(
+            top: 12,
+            left: 12,
+            right: 12,
+            child: Column(
+              children: [
+                _buildMapSearchBar(),
+                if (_suggestions.isNotEmpty) _buildSuggestionsList(),
+              ],
             ),
-          ],
+          ),
+
+          // "Use my current location" button.
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: FloatingActionButton.small(
+              heroTag: 'locate_me',
+              backgroundColor: Colors.white,
+              foregroundColor: primary,
+              onPressed: _fetchingCurrentLocation ? null : _useCurrentLocation,
+              child: _fetchingCurrentLocation
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: primary,
+                      ),
+                    )
+                  : const Icon(Icons.my_location_rounded),
+            ),
+          ),
+
+          if (_locationLoading)
+            Container(
+              color: Colors.white70,
+              child: const Center(
+                child: CircularProgressIndicator(color: primary),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMapSearchBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: _searchCtrl,
+        focusNode: _searchFocus,
+        textInputAction: TextInputAction.search,
+        onSubmitted: _searchAndMoveTo,
+        style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
+        decoration: InputDecoration(
+          hintText: 'Search for a location',
+          hintStyle: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+          prefixIcon: const Icon(Icons.search, color: primary),
+          suffixIcon: _searchingSuggestions
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: primary,
+                    ),
+                  ),
+                )
+              : (_searchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 20),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _suggestions = []);
+                        },
+                      )
+                    : null),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSuggestionsList() {
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      constraints: const BoxConstraints(maxHeight: 220),
+      child: ListView.separated(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        itemCount: _suggestions.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final suggestion = _suggestions[index];
+          return ListTile(
+            dense: true,
+            leading: const Icon(Icons.location_on_outlined, color: primary),
+            title: Text(
+              suggestion.description,
+              style: const TextStyle(fontSize: 13.5),
+            ),
+            onTap: () => _selectSuggestion(suggestion),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildZoneWarning() {
+    return Container(
+      width: double.infinity,
+      color: Colors.red.shade50,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+      child: const Text(
+        'This location is outside our delivery zone.',
+        style: TextStyle(
+          fontSize: 12,
+          color: Colors.red,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
@@ -450,17 +907,13 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Address is set from the map above — you can fine-tune it here if needed.',
+          'Search on the map, tap a location, or use your current location '
+          'to set your delivery address.',
           style: TextStyle(fontSize: 12, color: Colors.grey),
         ),
         const SizedBox(height: 16),
 
-        _buildTextField(
-          _addressCtrl,
-          'Address (Manually Editable)',
-          Icons.home_work_rounded,
-          maxLines: 2,
-        ),
+        _buildAddressField(),
         const SizedBox(height: 14),
 
         Row(
@@ -488,10 +941,13 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
 
         _buildTextField(
           _phoneCtrl,
-          'Phone Number (03001234567)',
+          'Phone Number (+923001234567)',
           Icons.phone_android,
           keyboardType: TextInputType.phone,
-          maxLength: 11,
+          maxLength: 10,
+
+          prefixText: '+92 ',
+          extraFormatters: [FilteringTextInputFormatter.digitsOnly],
         ),
         const SizedBox(height: 8),
 
@@ -527,6 +983,19 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     );
   }
 
+  Widget _buildAddressField() {
+    return _buildTextField(
+      _addressCtrl,
+      'Address',
+      Icons.home_work_rounded,
+      // Was 2 — a merged place-name + formatted-address string routinely
+      // runs longer than 2 lines and was getting visually clipped even
+      // though the full text was already saved in the controller.
+      maxLines: 4,
+      focusNode: _addressFocus,
+    );
+  }
+
   Widget _buildTextField(
     TextEditingController controller,
     String label,
@@ -536,13 +1005,17 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     bool readOnly = false,
     int maxLines = 1,
     bool capitalizeWords = false,
+    FocusNode? focusNode,
+    Widget? suffix,
+    String? prefixText,
+    List<TextInputFormatter>? extraFormatters,
   }) {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -550,19 +1023,17 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       ),
       child: TextField(
         controller: controller,
+        focusNode: focusNode,
         keyboardType: keyboardType,
         maxLength: maxLength,
         readOnly: readOnly,
         maxLines: maxLines,
-        // Auto-capitalizes the first letter of each word as the user
-        // types (e.g. "ali khan" -> "Ali Khan"). textCapitalization only
-        // switches the on-screen keyboard's shift state; the formatter
-        // is what actually enforces it in the text itself, including
-        // pasted text or a hardware keyboard.
         textCapitalization: capitalizeWords
             ? TextCapitalization.words
             : TextCapitalization.none,
-        inputFormatters: capitalizeWords ? [CapitalizeWordsFormatter()] : null,
+        inputFormatters: capitalizeWords
+            ? [CapitalizeWordsFormatter()]
+            : extraFormatters,
         style: const TextStyle(
           fontWeight: FontWeight.w500,
           color: Colors.black87,
@@ -572,6 +1043,12 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           labelStyle: TextStyle(color: Colors.grey.shade700, fontSize: 13),
           counterText: "",
           prefixIcon: Icon(icon, color: primary, size: 22),
+          prefixText: prefixText,
+          prefixStyle: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+          suffixIcon: suffix,
           filled: true,
           fillColor: readOnly ? Colors.grey.shade200 : fieldBg,
           contentPadding: const EdgeInsets.symmetric(

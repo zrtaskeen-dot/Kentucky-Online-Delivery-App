@@ -149,8 +149,20 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
   double get _total => _computeOrderTotal(data, _items);
 
+  double get _itemsSubtotal => _items.fold(
+    0.0,
+    (sum, item) => sum + (_readItemPrice(item) * _readItemQuantity(item)),
+  );
+
+  double get _deliveryFee {
+    final diff = _total - _itemsSubtotal;
+    return diff > 0 ? diff : 0;
+  }
+
   String get _status =>
-      (data['order_status'] ?? 'pending').toString().toLowerCase();
+      (data['orderStatus'] ?? data['order_status'] ?? 'pending')
+          .toString()
+          .toLowerCase();
 
   bool get _isActive => !_pastStatuses.contains(_status);
 
@@ -182,19 +194,26 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     return s;
   }
 
-  String get _name => (data['customer_name'] ?? data['name'] ?? '—').toString();
+  String get _name =>
+      (data['customerName'] ?? data['customer_name'] ?? data['name'] ?? '—')
+          .toString();
 
   String get _phone =>
-      (data['phone_number'] ?? data['phone'] ?? '—').toString();
+      (data['phoneNumber'] ?? data['phone_number'] ?? data['phone'] ?? '—')
+          .toString();
 
   String get _address =>
-      (data['delivery_address'] ?? data['address'] ?? '—').toString();
+      (data['deliveryAddress'] ??
+              data['delivery_address'] ??
+              data['address'] ??
+              '—')
+          .toString();
 
   String get _deliveryTime =>
-      (data['delivery_time'] ?? data['deliveryTime'] ?? '—').toString();
+      (data['deliveryTime'] ?? data['delivery_time'] ?? '—').toString();
 
   String get _paymentMethod =>
-      (data['payment_method'] ?? data['paymentMethod'] ?? '—').toString();
+      (data['paymentMethod'] ?? data['payment_method'] ?? '—').toString();
 
   // Delivery screen sets this to "Standard Delivery" for immediate
   // orders, and a formatted date/time string for scheduled orders.
@@ -420,7 +439,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     }
 
     await FirebaseFirestore.instance.collection('orders').doc(orderId).update({
-      'order_status': 'cancelled',
+      'orderStatus': 'cancelled',
       'cancelledBy': 'customer',
       'cancelledAt': FieldValue.serverTimestamp(),
     });
@@ -921,6 +940,43 @@ class OrderHistoryDetailScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Subtotal",
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                Text(
+                  "Rs. ${_itemsSubtotal.toStringAsFixed(0)}",
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Delivery Fee",
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                Text(
+                  _deliveryFee == 0
+                      ? "FREE"
+                      : "Rs. ${_deliveryFee.toStringAsFixed(0)}",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _deliveryFee == 0 ? Colors.green : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Divider(height: 1),
+            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

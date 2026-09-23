@@ -567,7 +567,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
+                      color: Colors.white.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -598,7 +598,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 fontSize: 13,
                 fontWeight: FontWeight.w400,
                 letterSpacing: 0.1,
-                color: creamColor.withOpacity(0.85),
+                color: creamColor.withValues(alpha: 0.85),
               ),
             ),
           ],
@@ -621,7 +621,7 @@ class _LoginScreenState extends State<LoginScreen> {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
+            color: Colors.black.withValues(alpha: 0.03),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -661,12 +661,12 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildDivider() {
     return Row(
       children: [
-        Expanded(child: Divider(color: Colors.black.withOpacity(0.15))),
+        Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 12),
           child: Text("or", style: TextStyle(color: Colors.black45, fontSize: 12)),
         ),
-        Expanded(child: Divider(color: Colors.black.withOpacity(0.15))),
+        Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
       ],
     );
   }

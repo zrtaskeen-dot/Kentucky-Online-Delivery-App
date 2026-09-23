@@ -54,6 +54,14 @@ class OrderDetailsScreen extends StatelessWidget {
   bool get _isPendingReceiptUpload =>
       _isScheduled && _isOnlinePayment && !receiptUploaded;
 
+  double get _itemsSubtotal =>
+      cartItems.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
+
+  double get _deliveryFee {
+    final diff = totalAmount - _itemsSubtotal;
+    return diff > 0 ? diff : 0;
+  }
+
   void goBackToMenu(BuildContext context) {
     Navigator.pushAndRemoveUntil(
       context,
@@ -355,7 +363,7 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  // Cancels a scheduled order. Uses 'order_status' — same field HomeScreen
+  // Cancels a scheduled order. Uses 'orderStatus' — same field HomeScreen
   // already reads/writes for order state (e.g. 'Delivered').
   Future<void> _cancelOrder(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -385,7 +393,7 @@ class OrderDetailsScreen extends StatelessWidget {
 
     try {
       await FirebaseFirestore.instance.collection('orders').doc(orderId).update(
-        {'order_status': 'Cancelled'},
+        {'orderStatus': 'Cancelled'},
       );
       if (context.mounted) {
         ScaffoldMessenger.of(
@@ -425,6 +433,43 @@ class OrderDetailsScreen extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Subtotal",
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                Text(
+                  "Rs. ${_itemsSubtotal.toStringAsFixed(0)}",
+                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  "Delivery Fee",
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                Text(
+                  _deliveryFee == 0
+                      ? "FREE"
+                      : "Rs. ${_deliveryFee.toStringAsFixed(0)}",
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _deliveryFee == 0 ? Colors.green : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Divider(height: 1),
+            ),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [

@@ -17,10 +17,9 @@ class CartScreen extends StatelessWidget {
 
   
   static const double _freeDeliveryThreshold = 500;
-  static const double _deliveryFee = 50;
 
-  double _calculateDeliveryFee(double subtotal) {
-    return subtotal < _freeDeliveryThreshold ? _deliveryFee : 0;
+  double _calculateDeliveryFee(double subtotal, double branchDeliveryCharge) {
+    return subtotal < _freeDeliveryThreshold ? branchDeliveryCharge : 0;
   }
 
   Future<void> _updateQuantity(String docId, int currentQty, int change) async {
@@ -38,6 +37,9 @@ class CartScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final String userId =
         FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
+    final double branchDeliveryCharge = context
+        .watch<CartProvider>()
+        .deliveryCharge;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -105,6 +107,7 @@ class CartScreen extends StatelessWidget {
 
           final double deliveryFee = _calculateDeliveryFee(
             calculatedTotalPrice,
+            branchDeliveryCharge,
           );
           final double grandTotal = calculatedTotalPrice + deliveryFee;
 

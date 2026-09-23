@@ -19,6 +19,7 @@ class CartItem {
 class CartProvider with ChangeNotifier {
   final List<CartItem> _items = [];
   String _selectedBranchId = ''; // Active branch id state
+  double _deliveryCharge = 50; // Fallback until the branch's own value loads
 
   List<CartItem> get items => _items;
 
@@ -29,6 +30,14 @@ class CartProvider with ChangeNotifier {
   void setBranchId(String branchId) {
     _selectedBranchId = branchId;
     notifyListeners(); // Notifies the whole app of the branch change.
+  }
+
+  // The selected branch's delivery charge, from restaurant_info.
+  double get deliveryCharge => _deliveryCharge;
+
+  void setDeliveryCharge(double charge) {
+    _deliveryCharge = charge;
+    notifyListeners();
   }
 
   // Updated Cart badge count: returns total sum of item quantities.

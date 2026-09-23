@@ -36,25 +36,31 @@ class FirestoreService {
         'orders',
       );
 
-      // 👈 CHANGED: field names ab OrderHistoryScreen ke saath match karte hain
-      // (customerId / status / totalAmount / createdAt), taake "My Orders"
-      // query aur data reads sahi se kaam karein.
+      // 👈 CHANGED: ab har field camelCase (no underscores) hai, taake
+      // branchId/customerId/createdAt/isFeedbackSubmitted jaisi existing
+      // fields ke naming style ke saath consistent rahe.
+      // ⚠️ IMPORTANT: agar koi doosri screen (OrderHistoryScreen, admin
+      // panel, Cloud Functions, etc.) purane snake_case field names
+      // (customer_name / phone_number / delivery_address / delivery_time /
+      // payment_method / transaction_id / order_status) se query ya read
+      // kar rahi hai, wahan bhi naam update karne honge — warna woh
+      // screens data read/query nahi kar paayengi. Yeh sirf saveOrder ka
+      // write side hai.
       final docRef = await orders.add({
-        'customer_name': name,
-        'phone_number': phone,
-        'delivery_address': address,
-        'totalAmount': totalAmount, // 👈 was 'total_bill'
-        'delivery_time': deliveryTime,
-        'payment_method': paymentMethod,
-        'transaction_id': transactionId,
+        'customerName': name,
+        'phoneNumber': phone,
+        'deliveryAddress': address,
+        'totalAmount': totalAmount,
+        'deliveryTime': deliveryTime,
+        'paymentMethod': paymentMethod,
+        'transactionId': transactionId,
         'latitude': latitude,
         'longitude': longitude,
         'items': itemsList,
-        'order_status':
-            'pending', // 👈 CHANGED: ab sirf 'order_status' likha jata hai, 'status' nahi
-        'createdAt': FieldValue.serverTimestamp(), // 👈 was 'order_date'
+        'orderStatus': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
         'branchId': branchId,
-        'customerId': currentUserId, // 👈 was 'userId'
+        'customerId': currentUserId,
         'isFeedbackSubmitted': false,
         // 👈 ADDED: only written when a receipt was actually uploaded
         // (Online payment) — COD orders simply won't have this field.

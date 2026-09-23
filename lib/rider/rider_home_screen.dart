@@ -33,9 +33,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
   // 👈 Matches Home screen's exact brand palette (maroon + orange + white)
-  static const primary = Color(0xFFA70000); // Maroon (same as Home) - icons always this color
-  static const accentOrange = Color(0xFFFF8A00); // Selected background circle (same as Home)
-  static const navBarBg = Color(0xFFFFFDFA); // bottom bar bg (same as Home's card tint)
+  static const primary = Color(
+    0xFFA70000,
+  ); // Maroon (same as Home) - icons always this color
+  static const accentOrange = Color(
+    0xFFFF8A00,
+  ); // Selected background circle (same as Home)
+  static const navBarBg = Color(
+    0xFFFFFDFA,
+  ); // bottom bar bg (same as Home's card tint)
   static const bgColor = Colors.white; // (same as Home)
 
   // Earnings filter — a custom date range only. Null start/end means no
@@ -93,7 +99,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
 
   // Same as _buildNavItem, but for the Orders tab specifically: overlays
   // a small red count badge showing how many newly-assigned orders are
-  // waiting on this rider (order_status == 'Assigned', not yet
+  // waiting on this rider (orderStatus == 'Assigned', not yet
   // accepted). The badge hides itself while the rider is already on the
   // Orders tab — opening that tab is what counts as "having seen" the
   // new orders — and reappears if a fresh one comes in while they're
@@ -103,7 +109,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
       stream: FirebaseFirestore.instance
           .collection('orders')
           .where('riderId', isEqualTo: widget.riderId)
-          .where('order_status', isEqualTo: 'Assigned')
+          .where('orderStatus', isEqualTo: 'Assigned')
           .snapshots(),
       builder: (context, snapshot) {
         final int newOrdersCount = snapshot.data?.docs.length ?? 0;
@@ -804,7 +810,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                     totalOrders = docs.length;
                     for (var doc in docs) {
                       final orderData = doc.data() as Map<String, dynamic>;
-                      final status = orderData['order_status'];
+                      final status =
+                          orderData['orderStatus'] ?? orderData['order_status'];
                       if (status == 'Delivered') {
                         delivered++;
                         // Rider's earning for a delivered order = its bill.
@@ -820,9 +827,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                             _dateInEarningsPeriod(orderDate);
 
                         if (inSelectedPeriod) {
-                          final method = (orderData['payment_method'] ?? '')
-                              .toString()
-                              .toLowerCase();
+                          final method =
+                              (orderData['paymentMethod'] ??
+                                      orderData['payment_method'] ??
+                                      '')
+                                  .toString()
+                                  .toLowerCase();
                           final isOnline =
                               method.contains('easypaisa') ||
                               method.contains('jazzcash') ||
@@ -837,8 +847,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
 
                           earningEntries.add(
                             _EarningEntry(
-                              name: (orderData['customer_name'] ?? 'Customer')
-                                  .toString(),
+                              name:
+                                  (orderData['customerName'] ??
+                                          orderData['customer_name'] ??
+                                          'Customer')
+                                      .toString(),
                               isOnline: isOnline,
                               time: orderDate,
                               amount: billAmt,
@@ -1003,11 +1016,14 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
             }
 
             final allDocs = snapshot.data!.docs;
-            final assignedDocs = allDocs
-                .where((d) => (d.data() as Map)['order_status'] == 'Assigned')
-                .toList();
+            final assignedDocs = allDocs.where((d) {
+              final data = d.data() as Map;
+              final s = data['orderStatus'] ?? data['order_status'];
+              return s == 'Assigned';
+            }).toList();
             final acceptedDocs = allDocs.where((d) {
-              final s = (d.data() as Map)['order_status'];
+              final data = d.data() as Map;
+              final s = data['orderStatus'] ?? data['order_status'];
               return s == 'Accepted' ||
                   s == 'Delivery Started' ||
                   s == 'Picked Up' ||
@@ -1091,15 +1107,17 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     required bool isAccepted,
     required RiderController rc,
   }) {
-    final customerName = data['customer_name'] ?? 'Unknown';
-    final address = data['delivery_address'] ?? 'No address';
+    final customerName =
+        data['customerName'] ?? data['customer_name'] ?? 'Unknown';
+    final address =
+        data['deliveryAddress'] ?? data['delivery_address'] ?? 'No address';
     final totalBill = data['totalAmount'] ?? 0;
-    final paymentMethod = data['payment_method'] ?? '';
+    final paymentMethod = data['paymentMethod'] ?? data['payment_method'] ?? '';
     final List items = data['items'] ?? [];
     final firstImage = items.isNotEmpty
         ? (items[0] as Map)['imageUrl'] ?? ''
         : '';
-    final status = data['order_status'] ?? '';
+    final status = data['orderStatus'] ?? data['order_status'] ?? '';
     final customerId = data['customerId'] ?? data['userId'] ?? '';
 
     return GestureDetector(
@@ -1334,14 +1352,16 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     required bool isAccepted,
     required RiderController rc,
   }) {
-    final customerName = data['customer_name'] ?? 'Unknown';
-    final address = data['delivery_address'] ?? 'No address';
+    final customerName =
+        data['customerName'] ?? data['customer_name'] ?? 'Unknown';
+    final address =
+        data['deliveryAddress'] ?? data['delivery_address'] ?? 'No address';
     final totalBill = data['totalAmount'] ?? 0;
-    final paymentMethod = data['payment_method'] ?? '';
-    final phone = data['phone_number'] ?? '';
+    final paymentMethod = data['paymentMethod'] ?? data['payment_method'] ?? '';
+    final phone = data['phoneNumber'] ?? data['phone_number'] ?? '';
     final lat = data['latitude'];
     final lng = data['longitude'];
-    final currentStatus = data['order_status'] ?? '';
+    final currentStatus = data['orderStatus'] ?? data['order_status'] ?? '';
     final customerId =
         data['customerId'] ?? data['userId'] ?? ''; // 👈 Extracted customerId
 
@@ -1452,7 +1472,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                         const SizedBox(height: 16),
 
                         // Start Delivery: this is the real "start" of the
-                        // delivery. It writes order_status: 'Delivery
+                        // delivery. It writes orderStatus: 'Delivery
                         // Started' and runs the one-active-delivery check —
                         // if the rider already has another delivery in
                         // progress, the warning popup appears here instead
