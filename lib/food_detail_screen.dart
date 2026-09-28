@@ -141,9 +141,14 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
 
   Future<void> _fetchToppings() async {
     try {
+      // NOTE: assumes topping documents carry a `branchId` field, the
+      // same way cart entries do (see 'branchId': widget.selectedBranchId
+      // below) — adjust the field name here if your toppings collection
+      // uses a different one.
       final snap = await FirebaseFirestore.instance
           .collection('toppings')
           .where('category', isEqualTo: widget.item.category)
+          .where('branchId', isEqualTo: widget.selectedBranchId)
           .get();
       setState(() {
         toppingsData = {for (var d in snap.docs) d.id: d.data()};
@@ -245,7 +250,29 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                 expandedHeight: 260,
                 pinned: true,
                 backgroundColor: themeColor,
-                iconTheme: const IconThemeData(color: Colors.black),
+                elevation: 0,
+                leading: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(context),
+                    child: Container(
+                      width: 38,
+                      height: 38,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(color: Colors.black12, blurRadius: 6),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: Colors.black,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
                 flexibleSpace: FlexibleSpaceBar(
                   background: _buildImage(widget.item.imageUrl),
                 ),
@@ -275,14 +302,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                                   fontWeight: FontWeight.w900,
                                   color: Colors.black,
                                 ),
-                              ),
-                            ),
-                            Text(
-                              'Rs. $totalPrice',
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                color: themeColor,
                               ),
                             ),
                           ],

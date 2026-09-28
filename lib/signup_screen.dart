@@ -35,7 +35,10 @@ class CapitalizeWordsFormatter extends TextInputFormatter {
       }
     }
 
-    return newValue.copyWith(text: buffer.toString(), selection: newValue.selection);
+    return newValue.copyWith(
+      text: buffer.toString(),
+      selection: newValue.selection,
+    );
   }
 }
 
@@ -62,6 +65,15 @@ class _SignUpScreenState extends State<SignUpScreen> {
   static const Color themeColor = Color(0xFFA70000);
   static const Color creamColor = Colors.white;
   static const Color fieldColor = Color(0xFFFFFDFA);
+
+  // Success/error message card colors — border, light fill, and text
+  // all in the same hue so the card reads as one clear signal.
+  static const Color successBorder = Color(0xFF4A7C59);
+  static const Color successBg = Color(0xFFEAF3ED);
+  static const Color successText = Color(0xFF2F5B3E);
+  static const Color errorBorder = Color(0xFFC62828);
+  static const Color errorBg = Color(0xFFFDECEA);
+  static const Color errorText = Color(0xFFB71C1C);
 
   final Map<String, String> roleMap = {
     'customer': 'R001',
@@ -96,13 +108,71 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return null;
   }
 
-  // Small helper so every snackbar in this screen consistently uses the
-  // app's maroon theme color instead of the default red.
-  void _showSnack(String msg, {Color color = themeColor}) {
+  // Firebase's raw error messages are long, technical, and English-legal
+  // sounding (e.g. "The email address is already in use by another
+  // account."). This maps the common ones to short, plain messages that
+  // fit on a single snackbar line instead of getting cut off.
+  String _authErrorMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'email-already-in-use':
+        return 'This email is already registered. Try logging in.';
+      case 'invalid-email':
+        return 'That email address looks invalid.';
+      case 'weak-password':
+        return 'Password is too weak.';
+      case 'network-request-failed':
+        return 'No internet connection. Please try again.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait and try again.';
+      case 'operation-not-allowed':
+        return 'Sign up is currently disabled. Try again later.';
+      default:
+        return 'Registration failed. Please try again.';
+    }
+  }
+
+  // Success messages get a green-bordered/light-green/green-text card;
+  // error messages get the same treatment in red. isError defaults to
+  // true since most call sites here are reporting a failure.
+  void _showSnack(String msg, {bool isError = true}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
+    final borderColor = isError ? errorBorder : successBorder;
+    final fillColor = isError ? errorBg : successBg;
+    final textColor = isError ? errorText : successText;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 3),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Text(
+            msg,
+            textAlign: TextAlign.center,
+            // Was maxLines: 1 with an ellipsis, which cut longer messages
+            // off mid-sentence. Messages are now kept short at the
+            // source (see _authErrorMessage), and this allows up to 3
+            // lines so nothing gets truncated even if one runs long.
+            maxLines: 3,
+            overflow: TextOverflow.visible,
+            style: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ────────────────────────────────────────────────────────────
@@ -123,7 +193,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       );
     } catch (e) {
       if (!mounted) return;
-      _showSnack("Could not continue as guest: $e");
+      _showSnack("Could not continue as guest. Please try again.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -189,14 +259,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await credential.user!.sendEmailVerification();
       await credential.user!.updateDisplayName(_nameController.text.trim());
 
-      // NOTE: The Firestore 'users' document is intentionally NOT created
-      // here anymore. It's created only after the user successfully
-      // verifies their email and logs in for the first time (see
-      // LoginScreen._signIn in login_screen.dart). This guarantees that if
-      // someone never verifies their email, no Firestore user document (or
-      // any other user data keyed off it) ever gets created for them —
-      // only the unverified Firebase Auth account exists until then.
-
       if (guestUid != null) {
         await _migrateGuestCart(guestUid, credential.user!.uid);
       }
@@ -204,10 +266,12 @@ class _SignUpScreenState extends State<SignUpScreen> {
       // 👈 ADDED: save this device's FCM token right after account
       // creation, same as the login flow.
       await FcmService.syncDeviceToken(credential.user!.uid);
+      await FirebaseAuth.instance.signOut();
 
       if (!mounted) return;
       _showSnack(
-        "Verification email sent. Please verify your email, then log in.",
+        "Verification email sent. Please verify your email.",
+        isError: false,
       );
 
       Navigator.pushReplacement(
@@ -217,7 +281,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         ),
       );
     } on FirebaseAuthException catch (e) {
-      _showSnack(e.message ?? 'Registration failed');
+      _showSnack(_authErrorMessage(e));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -225,13 +289,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   // ────────────────────────────────────────────────────────────
   // GOOGLE SIGN-UP — mirror image of the login page's Google flow.
-  // The login page's "Continue with Google" refuses to create an
-  // account; this one is the opposite: it creates the account if this
-  // is a brand-new Google identity, and if one already exists it backs
-  // out and tells the person to log in instead (so tapping this button
-  // twice can't silently just log an existing user back in without
-  // going through the sign-up screen's role/consent).
-  // ────────────────────────────────────────────────────────────
 
   Future<void> _signUpWithGoogle() async {
     setState(() => _isLoading = true);
@@ -275,9 +332,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         await FirebaseAuth.instance.signOut();
         await GoogleSignIn().signOut();
         if (!mounted) return;
-        _showSnack(
-          "An account already exists for this Google email. Please log in instead.",
-        );
+        _showSnack("Account already exists. Please log in instead.");
         return;
       }
 
@@ -308,7 +363,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         (route) => false,
       );
     } catch (e) {
-      _showSnack("Google Sign-Up failed: $e");
+      _showSnack("Google Sign-Up failed. Please try again.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -630,9 +685,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
         textCapitalization: capitalizeWords
             ? TextCapitalization.words
             : TextCapitalization.none,
-        inputFormatters: capitalizeWords
-            ? [CapitalizeWordsFormatter()]
-            : null,
+        inputFormatters: capitalizeWords ? [CapitalizeWordsFormatter()] : null,
         style: const TextStyle(
           fontWeight: FontWeight.w500,
           color: Colors.black87,

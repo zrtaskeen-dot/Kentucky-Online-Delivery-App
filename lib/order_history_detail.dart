@@ -280,13 +280,27 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     }
   }
 
-  // True once we're within 2 hours of the scheduled delivery time (or if
-  // the label couldn't be parsed at all — fails open rather than
-  // permanently blocking the upload).
+  // The payment/receipt upload opens exactly 1h30m before the scheduled
+  // delivery time and closes again when that delivery time arrives — a
+  // window, not just a "not yet" cutoff. Previously there was no upper
+  // bound, so the button stayed visible forever after the scheduled time.
+  static const Duration _uploadWindow = Duration(hours: 1, minutes: 30);
+
+  // Fails open (window treated as open) if the label can't be parsed,
+  // rather than permanently blocking the upload.
   bool get _isWithinUploadWindow {
     final dt = _scheduledDateTime;
     if (dt == null) return true;
-    return !DateTime.now().isBefore(dt.subtract(const Duration(hours: 2)));
+    final now = DateTime.now();
+    return !now.isBefore(dt.subtract(_uploadWindow)) && now.isBefore(dt);
+  }
+
+  // True once the scheduled delivery time has passed with no receipt ever
+  // uploaded — the window is permanently closed, not just "not open yet".
+  bool get _isUploadWindowExpired {
+    final dt = _scheduledDateTime;
+    if (dt == null) return false;
+    return !DateTime.now().isBefore(dt);
   }
 
   bool get _canUploadReceiptNow => _needsReceiptUpload && _isWithinUploadWindow;
@@ -551,26 +565,39 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                       ],
                       if (_needsReceiptUpload) ...[
                         const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: Colors.orange.withValues(alpha: 0.35),
-                            ),
-                          ),
-                          child: Text(
-                            "Not Confirmed",
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade800,
-                            ),
-                          ),
+                        _LiveTicker(
+                          builder: (context) {
+                            // Orange while still possible to confirm by
+                            // uploading; red once the deadline has passed
+                            // and it's final.
+                            final Color base = _isUploadWindowExpired
+                                ? const Color(0xFFC62828)
+                                : Colors.orange;
+                            final Color text = _isUploadWindowExpired
+                                ? const Color(0xFFB71C1C)
+                                : Colors.orange.shade800;
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: base.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: base.withValues(alpha: 0.35),
+                                ),
+                              ),
+                              child: Text(
+                                "Not Confirmed",
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: text,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ],
@@ -645,6 +672,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                   const SizedBox(height: 8),
 
                   _buildDetailsCard(),
+                  _buildActionButtons(context),
                 ],
               ),
             ),
@@ -653,6 +681,193 @@ class OrderHistoryDetailScreen extends StatelessWidget {
           _buildBottomBar(context),
         ],
       ),
+    );
+  }
+
+  // Cancel / Receipt-upload / Track — these are order *actions*, so they
+  // now live right under the customer's own delivery details instead of
+  // under the price summary at the bottom. Pulled out of _buildBottomBar
+  // unchanged, just relocated.
+  Widget _buildActionButtons(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_isScheduled && _isActive)
+          _LiveTicker(
+            builder: (context) => _canCancelOrder
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 46,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _confirmCancelOrder(context),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.red,
+                          side: const BorderSide(color: Colors.red),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.cancel_outlined, size: 18),
+                        label: const Text(
+                          "Cancel Order",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  )
+                // Cancellation window has passed — hide this section
+                // entirely instead of explaining why, so the screen
+                // doesn't stay cluttered with an inactive notice.
+                : const SizedBox.shrink(),
+          ),
+
+        if (_needsReceiptUpload)
+          _LiveTicker(
+            builder: (context) {
+              // Inside the window: the upload button, with the deadline
+              // passed in so it also refuses a pick made after it closes.
+              if (_canUploadReceiptNow) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: ReceiptUploadButton(
+                    orderId: orderId,
+                    provider: _paymentMethod,
+                    deadline: _scheduledDateTime,
+                  ),
+                );
+              }
+
+              // Deadline passed with no receipt: no upload any more, and
+              // the outcome is stated plainly instead.
+              if (_isUploadWindowExpired) {
+                return Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFDECEA),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: const Color(0xFFC62828),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.cancel_rounded,
+                        size: 18,
+                        color: Color(0xFFB71C1C),
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          "Not Confirmed — receipt wasn't uploaded in time.",
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFB71C1C),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              // Window hasn't opened yet.
+              return Container(
+                margin: const EdgeInsets.only(top: 12),
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.black12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.lock_clock_rounded,
+                      size: 18,
+                      color: Colors.black45,
+                    ),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Payment opens 1 hour 30 minutes before delivery.",
+                        style: TextStyle(fontSize: 12.5, color: Colors.black54),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+
+        if (_isActive) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: _hasRiderAssigned
+                  ? () {
+                      Navigator.of(context).pop();
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => LiveTrackingScreen(orderId: orderId),
+                        ),
+                      );
+                    }
+                  : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _hasRiderAssigned
+                    ? themeColor
+                    : Colors.grey.shade400,
+                disabledBackgroundColor: Colors.grey.shade400,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 0,
+              ),
+              icon: Icon(
+                Icons.location_on_rounded,
+                color: _hasRiderAssigned ? Colors.white : Colors.white70,
+              ),
+              label: Text(
+                "Track Order",
+                style: TextStyle(
+                  color: _hasRiderAssigned ? Colors.white : Colors.white70,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          if (!_hasRiderAssigned) ...[
+            const SizedBox(height: 6),
+            const Text(
+              "Rider not assigned yet.",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: Colors.grey,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ],
     );
   }
 
@@ -921,11 +1136,11 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
   Widget _buildBottomBar(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: lightMaroon),
         boxShadow: const [
           BoxShadow(
@@ -945,28 +1160,28 @@ class OrderHistoryDetailScreen extends StatelessWidget {
               children: [
                 const Text(
                   "Subtotal",
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
                 ),
                 Text(
                   "Rs. ${_itemsSubtotal.toStringAsFixed(0)}",
-                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 5),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
                   "Delivery Fee",
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
                 ),
                 Text(
                   _deliveryFee == 0
                       ? "FREE"
                       : "Rs. ${_deliveryFee.toStringAsFixed(0)}",
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: _deliveryFee == 0 ? Colors.green : Colors.black87,
                   ),
@@ -974,7 +1189,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
               ],
             ),
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
+              padding: EdgeInsets.symmetric(vertical: 8),
               child: Divider(height: 1),
             ),
             Row(
@@ -983,7 +1198,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                 const Text(
                   "Total",
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 15,
                     fontWeight: FontWeight.w500,
                     color: Colors.black87,
                   ),
@@ -991,169 +1206,13 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                 Text(
                   "Rs. ${_total.toStringAsFixed(0)}",
                   style: const TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     fontWeight: FontWeight.bold,
                     color: themeColor,
                   ),
                 ),
               ],
             ),
-
-            if (_isScheduled && _isActive) ...[
-              const SizedBox(height: 16),
-              _LiveTicker(
-                builder: (context) => _canCancelOrder
-                    ? SizedBox(
-                        width: double.infinity,
-                        height: 46,
-                        child: OutlinedButton.icon(
-                          onPressed: () => _confirmCancelOrder(context),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          icon: const Icon(Icons.cancel_outlined, size: 18),
-                          label: const Text(
-                            "Cancel Order",
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      )
-                    : Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: Colors.black12),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(
-                              Icons.lock_clock_rounded,
-                              size: 18,
-                              color: Colors.black45,
-                            ),
-                            SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                "This order can no longer be cancelled — "
-                                "it's within 1 hour 30 minutes of the "
-                                "scheduled delivery time.",
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: Colors.black54,
-                                  height: 1.4,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-              ),
-            ],
-
-            if (_needsReceiptUpload) ...[
-              const SizedBox(height: 16),
-              if (_canUploadReceiptNow)
-                ReceiptUploadButton(orderId: orderId, provider: _paymentMethod)
-              else
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.black12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.lock_clock_rounded,
-                        size: 18,
-                        color: Colors.black45,
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          "Receipt upload opens 2 hours before your "
-                          "scheduled delivery time.",
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: Colors.black54,
-                            height: 1.4,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-
-            if (_isActive) ...[
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton.icon(
-                  onPressed: _hasRiderAssigned
-                      ? () {
-                          Navigator.of(context).pop();
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  LiveTrackingScreen(orderId: orderId),
-                            ),
-                          );
-                        }
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _hasRiderAssigned
-                        ? themeColor
-                        : Colors.grey.shade400,
-                    disabledBackgroundColor: Colors.grey.shade400,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    elevation: 0,
-                  ),
-                  icon: Icon(
-                    Icons.location_on_rounded,
-                    color: _hasRiderAssigned ? Colors.white : Colors.white70,
-                  ),
-                  label: Text(
-                    "Track Order",
-                    style: TextStyle(
-                      color: _hasRiderAssigned ? Colors.white : Colors.white70,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-              if (!_hasRiderAssigned) ...[
-                const SizedBox(height: 8),
-                const Text(
-                  "Rider not assigned yet. You'll be able to track once a rider picks up your order.",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ],
           ],
         ),
       ),

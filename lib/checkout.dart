@@ -9,6 +9,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'cart_provider.dart';
 import 'delivery_type.dart';
@@ -106,6 +107,13 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   Timer? _debounce;
   String _sessionToken = '';
 
+  // Debounce + re-entrancy guard for the Address field: typing in it
+  // should move the map, but setting its text programmatically (after a
+  // map tap, search selection, or GPS fetch) must NOT re-trigger another
+  // geocode of the text we just wrote there ourselves.
+  Timer? _addressDebounce;
+  bool _updatingAddressProgrammatically = false;
+
   gmaps.GoogleMapController? _mapController;
 
   LatLng _pinLatLng = const LatLng(33.6844, 73.0479); // Default: Islamabad
@@ -132,9 +140,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         point.longitude <= _zoneNorthEast.longitude;
   }
 
-  // Center + radius of the delivery zone, used to hard-restrict place
-  // search (autocomplete) results to only the Cantt area instead of just
-  // "biasing" toward it. Computed once from the existing zone bounds.
   static final LatLng _zoneCenter = LatLng(
     (_zoneSouthWest.latitude + _zoneNorthEast.latitude) / 2,
     (_zoneSouthWest.longitude + _zoneNorthEast.longitude) / 2,
@@ -184,12 +189,15 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _newSessionToken();
     _loadSavedInfo();
     _searchCtrl.addListener(_onSearchChanged);
+    _addressCtrl.addListener(_onAddressFieldChanged);
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _addressDebounce?.cancel();
     _searchCtrl.removeListener(_onSearchChanged);
+    _addressCtrl.removeListener(_onAddressFieldChanged);
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _phoneCtrl.dispose();
@@ -229,33 +237,138 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   // the order document itself (see FirestoreService.saveOrder). For the
   // "remember this for next time" convenience we reuse the same
   // SharedPreferences mechanism as the name/phone fields.
+  // Phone & address used to be remembered purely via local
+  // SharedPreferences (only when "Save info for next time" was checked).
+  // That meant editing your phone/address on the Profile screen had no
+  // effect on what showed up at checkout next time — checkout had its own
+  // separate memory. Now the user's Firestore profile (users/{uid}) is
+  // the source of truth for phone/address, and SharedPreferences is only
+  // a fallback for users who don't have those saved on their profile yet
+  // (e.g. guests, or before this change shipped).
   Future<void> _loadSavedInfo() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getBool(_kSaveFlag) ?? false;
 
+    // Name is still remembered locally via the checkbox, unchanged.
     if (saved) {
-      final lat = prefs.getDouble(_kLat);
-      final lng = prefs.getDouble(_kLng);
-      final address = prefs.getString(_kAddress);
-
       setState(() {
         _saveInfoForNextTime = true;
         _firstNameCtrl.text = prefs.getString(_kFirstName) ?? '';
         _lastNameCtrl.text = prefs.getString(_kLastName) ?? '';
-        _phoneCtrl.text = prefs.getString(_kPhone) ?? '';
-
-        if (lat != null &&
-            lng != null &&
-            address != null &&
-            address.trim().isNotEmpty) {
-          _pinLatLng = LatLng(lat, lng);
-          _setAddressSilently(address);
-        }
       });
-      _checkZone();
     }
 
+    final profile = await _fetchProfileDefaults();
+    final profilePhone = (profile?['phone_number'] as String?)?.trim();
+    final profileAddress = (profile?['address'] as String?)?.trim();
+    final profileLat = (profile?['lat'] as num?)?.toDouble();
+    final profileLng = (profile?['lng'] as num?)?.toDouble();
+
+    final phoneDigits = (profilePhone != null && profilePhone.isNotEmpty)
+        ? _localPhoneDigits(profilePhone)
+        : (saved ? (prefs.getString(_kPhone) ?? '') : '');
+
+    final address = (profileAddress != null && profileAddress.isNotEmpty)
+        ? profileAddress
+        : (saved ? prefs.getString(_kAddress) : null);
+
+    final lat = profileLat ?? (saved ? prefs.getDouble(_kLat) : null);
+    final lng = profileLng ?? (saved ? prefs.getDouble(_kLng) : null);
+
+    if (phoneDigits.isNotEmpty) {
+      setState(() => _phoneCtrl.text = phoneDigits);
+    }
+
+    if (lat != null &&
+        lng != null &&
+        address != null &&
+        address.isNotEmpty) {
+      setState(() => _pinLatLng = LatLng(lat, lng));
+      _setAddressSilently(address);
+      _checkZone();
+      setState(() => _locationLoading = false);
+      return;
+    }
+
+    if (address != null && address.isNotEmpty) {
+      // We have a saved address but no matching coordinates for it (can
+      // happen if it was typed into the Profile screen directly) — show
+      // the text, but still fall through to auto-detect a pin position.
+      _setAddressSilently(address);
+    }
+
+    // No usable saved coordinates — detect the user's actual current
+    // location instead of leaving the pin at a fixed, unrelated default.
+    await _detectDefaultLocation();
     setState(() => _locationLoading = false);
+  }
+
+  // Reads phone_number/address/lat/lng straight from the user's profile
+  // document. Returns null for guests or if the read fails, in which case
+  // callers fall back to SharedPreferences / auto-detected location.
+  Future<Map<String, dynamic>?> _fetchProfileDefaults() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      return doc.data();
+    } catch (e) {
+      debugPrint('Failed to fetch profile defaults for checkout: $e');
+      return null;
+    }
+  }
+
+  // The phone field only ever holds the 10 raw digits after +92 (see
+  // phoneRegExp in _proceedToDeliveryScreen), but a saved profile number
+  // may be stored with "+92", a leading "0", spaces, etc. This strips
+  // everything down to digits and keeps just the last 10 — the local
+  // subscriber number — so it fits back into that field correctly.
+  String _localPhoneDigits(String raw) {
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 10) return digits.substring(digits.length - 10);
+    return digits;
+  }
+
+  // Silent GPS fetch used only to pick a sensible *default* pin position
+  // when the screen first opens with no saved address. Unlike
+  // _useCurrentLocation (the map's FAB), this doesn't show our own
+  // confirmation dialog first — the OS permission prompt is already the
+  // consent step here. If location is unavailable or denied, the pin
+  // simply stays at the fallback coordinate set above.
+  Future<void> _detectDefaultLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) return;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      if (!mounted) return;
+
+      final point = LatLng(position.latitude, position.longitude);
+      setState(() => _pinLatLng = point);
+      _mapController?.animateCamera(
+        gmaps.CameraUpdate.newLatLng(_toGmaps(point)),
+      );
+      _checkZone();
+      await _reverseGeocode(point);
+    } catch (e) {
+      debugPrint('Failed to auto-detect default location: $e');
+    }
   }
 
   Future<void> _persistInfoIfNeeded() async {
@@ -282,7 +395,58 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
 
   void _setAddressSilently(String address) {
     if (!mounted) return;
+    _updatingAddressProgrammatically = true;
     setState(() => _addressCtrl.text = address);
+    _updatingAddressProgrammatically = false;
+  }
+
+  // User typing directly into the Address field (not via search bar or
+  // map tap) should still move the map — debounced so we're not
+  // geocoding on every keystroke.
+  void _onAddressFieldChanged() {
+    if (_updatingAddressProgrammatically) return;
+    _addressDebounce?.cancel();
+
+    final query = _addressCtrl.text.trim();
+    if (query.isEmpty) return;
+
+    _addressDebounce = Timer(const Duration(milliseconds: 800), () {
+      _geocodeTypedAddress(query);
+    });
+  }
+
+  // Moves the pin/map to match what's typed in the Address field, without
+  // rewriting the field itself — the user's own wording stays as they
+  // typed it. Zone checking still happens via _checkZone() either way, so
+  // the warning banner appears if this lands outside the delivery area.
+  Future<void> _geocodeTypedAddress(String query) async {
+    try {
+      final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
+        'address': query,
+        'key': _googleApiKey,
+        'bounds':
+            '${_zoneSouthWest.latitude},${_zoneSouthWest.longitude}|'
+            '${_zoneNorthEast.latitude},${_zoneNorthEast.longitude}',
+      });
+
+      final response = await http.get(uri);
+      final data = _decodeGoogleResponse(response);
+      final results = (data['results'] as List?) ?? [];
+      if (results.isEmpty || !mounted) return;
+
+      final location = results.first['geometry']['location'] as Map;
+      final lat = (location['lat'] as num).toDouble();
+      final lng = (location['lng'] as num).toDouble();
+      final point = LatLng(lat, lng);
+
+      setState(() => _pinLatLng = point);
+      _mapController?.animateCamera(
+        gmaps.CameraUpdate.newLatLng(_toGmaps(point)),
+      );
+      _checkZone();
+    } catch (e) {
+      debugPrint('Failed to geocode typed address: $e');
+    }
   }
 
   void _onSearchChanged() {
@@ -419,7 +583,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       final point = LatLng(lat, lng);
 
       if (!_isWithinDeliveryZone(point)) {
-        _snack('That address is outside our delivery zone (Cantt area).');
+        _snack('That address is outside our delivery zone.');
         return;
       }
 
@@ -548,20 +712,44 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     final wantsToShare = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Use your current location?'),
-        content: const Text(
-          'We need access to your device location to set your delivery '
-          'address automatically. You can still adjust it on the map '
-          'afterwards.',
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Use your current location?',
+          style: TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+            fontSize: 17,
+          ),
         ),
+        content: const Text(
+          'We need access to your device location to set your delivery address.',
+          style: TextStyle(color: Colors.black87, fontSize: 13.5, height: 1.4),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Not now'),
+            style: TextButton.styleFrom(foregroundColor: Colors.black54),
+            child: const Text(
+              'Not now',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Allow'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFA70000),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text(
+              'Allow',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ),
         ],
       ),
@@ -627,7 +815,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       return;
     }
     if (!_isInZone) {
-      _snack('Sorry, this branch only delivers within the Cantt area.');
+      _snack('This location is outside our delivery area.');
       return;
     }
 
@@ -651,10 +839,61 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     );
   }
 
-  void _snack(String msg) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: primary));
+  // Same success/error color scheme used on login_screen.dart and
+  // delivery_type.dart, so every "something went wrong" message in the
+  // app reads the same way.
+  static const Color _successBorder = Color(0xFF4A7C59);
+  static const Color _successBg = Color(0xFFEAF3ED);
+  static const Color _successText = Color(0xFF2F5B3E);
+  static const Color _errorBorder = Color(0xFFC62828);
+  static const Color _errorBg = Color(0xFFFDECEA);
+  static const Color _errorText = Color(0xFFB71C1C);
+
+  void _snack(String msg, {bool isError = true}) {
+    if (!mounted) return;
+    final borderColor = isError ? _errorBorder : _successBorder;
+    final fillColor = isError ? _errorBg : _successBg;
+    final textColor = isError ? _errorText : _successText;
+    final icon = isError
+        ? Icons.error_outline_rounded
+        : Icons.check_circle_outline_rounded;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: textColor, size: 17),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  msg,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -667,9 +906,9 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
+            Icons.arrow_back_rounded,
             color: creamText,
-            size: 20,
+            size: 24,
           ),
           onPressed: () => Navigator.pop(context),
         ),
@@ -905,12 +1144,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
             color: Colors.black87,
           ),
         ),
-        const SizedBox(height: 4),
-        const Text(
-          'Search on the map, tap a location, or use your current location '
-          'to set your delivery address.',
-          style: TextStyle(fontSize: 12, color: Colors.grey),
-        ),
         const SizedBox(height: 16),
 
         _buildAddressField(),
@@ -988,10 +1221,10 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       _addressCtrl,
       'Address',
       Icons.home_work_rounded,
-      // Was 2 — a merged place-name + formatted-address string routinely
-      // runs longer than 2 lines and was getting visually clipped even
-      // though the full text was already saved in the controller.
-      maxLines: 4,
+      // Was 4 — still felt cramped for a merged place-name + full address
+      // string, so giving it a bit more room.
+      maxLines: 5,
+      minLines: 3,
       focusNode: _addressFocus,
     );
   }
@@ -1004,6 +1237,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     int? maxLength,
     bool readOnly = false,
     int maxLines = 1,
+    int? minLines,
     bool capitalizeWords = false,
     FocusNode? focusNode,
     Widget? suffix,
@@ -1028,6 +1262,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         maxLength: maxLength,
         readOnly: readOnly,
         maxLines: maxLines,
+        minLines: minLines,
         textCapitalization: capitalizeWords
             ? TextCapitalization.words
             : TextCapitalization.none,
@@ -1053,7 +1288,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           fillColor: readOnly ? Colors.grey.shade200 : fieldBg,
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 14,
-            vertical: 14,
+            vertical: 16,
           ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),

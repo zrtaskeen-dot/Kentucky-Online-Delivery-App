@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
@@ -181,29 +182,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     }
   }
 
-  bool _isTimeWithinOperatingHours(TimeOfDay selected) {
-    if (_restaurantTiming.isEmpty ||
-        !_restaurantTiming.toLowerCase().contains(' to ')) {
-      return true;
-    }
-
-    final parts = _restaurantTiming.toLowerCase().split(' to ');
-    final openTime = _parseTimeString(parts[0]);
-    final closeTime = _parseTimeString(parts[1]);
-
-    if (openTime == null || closeTime == null) return true;
-
-    int selectedMins = selected.hour * 60 + selected.minute;
-    int openMins = openTime.hour * 60 + openTime.minute;
-    int closeMins = closeTime.hour * 60 + closeTime.minute;
-
-    if (openMins < closeMins) {
-      return selectedMins >= openMins && selectedMins <= closeMins;
-    } else {
-      return selectedMins >= openMins || selectedMins <= closeMins;
-    }
-  }
-
   Future<bool> _verifyImageWithMLKit(File file, String provider) async {
     setState(() => _isVerifyingImage = true);
     final inputImage = InputImage.fromFile(file);
@@ -308,104 +286,439 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  void _showThemedSnack(String message) {
+  // Success/error colors match the same scheme used on the sign-up screen
+  // (green for success, red for error) so feedback looks consistent across
+  // the app. isError defaults to true since most existing call sites here
+  // are reporting a validation problem or a failure.
+  static const Color _successBorder = Color(0xFF4A7C59);
+  static const Color _successBg = Color(0xFFEAF3ED);
+  static const Color _successText = Color(0xFF2F5B3E);
+  static const Color _errorBorder = Color(0xFFC62828);
+  static const Color _errorBg = Color(0xFFFDECEA);
+  static const Color _errorText = Color(0xFFB71C1C);
+
+  void _showThemedSnack(String message, {bool isError = true}) {
     if (!mounted) return;
+    final borderColor = isError ? _errorBorder : _successBorder;
+    final fillColor = isError ? _errorBg : _successBg;
+    final textColor = isError ? _errorText : _successText;
+    final icon = isError ? Icons.cancel_rounded : Icons.check_circle_rounded;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.cancel_rounded, color: Colors.redAccent, size: 18),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 12.5,
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: textColor, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.5,
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-        backgroundColor: Colors.black87,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         duration: const Duration(seconds: 2),
       ),
     );
   }
 
-  Future<void> _pickScheduleDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(hours: 2)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 3)),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: primary,
-              onPrimary: creamText,
-              surface: bgColor,
-              onSurface: Colors.black,
+  bool _isSameDate(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  String _dateOptionLabel(DateTime date, DateTime today) {
+    final diff = DateTime(
+      date.year,
+      date.month,
+      date.day,
+    ).difference(DateTime(today.year, today.month, today.day)).inDays;
+    if (diff == 0) return "Today";
+    if (diff == 1) return "Tomorrow";
+    const weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    return weekdays[date.weekday - 1];
+  }
+
+  // Generates delivery-time slots (every 30 min) within operating hours.
+  // Restaurant operating hours as (open, close) TimeOfDay, falling back
+  // to a sane default if the fetched timing string can't be parsed.
+  (TimeOfDay, TimeOfDay) _operatingHours() {
+    TimeOfDay open = const TimeOfDay(hour: 9, minute: 0);
+    TimeOfDay close = const TimeOfDay(hour: 23, minute: 0);
+
+    if (_restaurantTiming.isNotEmpty &&
+        _restaurantTiming.toLowerCase().contains(' to ')) {
+      final parts = _restaurantTiming.toLowerCase().split(' to ');
+      final o = _parseTimeString(parts[0]);
+      final c = _parseTimeString(parts[1]);
+      if (o != null && c != null) {
+        open = o;
+        close = c;
+      }
+    }
+    return (open, close);
+  }
+
+  bool _isWithinOperatingHours(TimeOfDay selected) {
+    final (open, close) = _operatingHours();
+    final int openMins = open.hour * 60 + open.minute;
+    int closeMins = close.hour * 60 + close.minute;
+    int selectedMins = selected.hour * 60 + selected.minute;
+
+    if (closeMins <= openMins) {
+      // Wraps past midnight (e.g. "6 PM to 2 AM").
+      closeMins += 24 * 60;
+      if (selectedMins < openMins) selectedMins += 24 * 60;
+    }
+    return selectedMins >= openMins && selectedMins <= closeMins;
+  }
+
+  // Custom bottom sheet, styled to match the rest of the app, so the
+  // Date/Time pickers no longer look like stock Material dialogs.
+  Widget _buildThemedPickerSheet({
+    required String title,
+    String? subtitle,
+    required Widget child,
+  }) {
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(12),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: primary.withValues(alpha: 0.15)),
+          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 16)],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: Colors.black12,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
             ),
-            dialogTheme: const DialogThemeData(backgroundColor: bgColor),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Colors.black87,
+              ),
+            ),
+            if (subtitle != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: const TextStyle(fontSize: 12, color: Colors.black54),
+              ),
+            ],
+            const SizedBox(height: 16),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.5,
+              ),
+              child: SingleChildScrollView(child: child),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pickerOptionTile({
+    required String label,
+    required String subtitle,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected ? primary : fieldBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: isSelected ? primary : Colors.black12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isSelected ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(
+                Icons.check_circle_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickScheduleDate() async {
+    final DateTime today = DateTime.now();
+    final DateTime todayDateOnly = DateTime(today.year, today.month, today.day);
+    final List<DateTime> options = List.generate(
+      4,
+      (i) => todayDateOnly.add(Duration(days: i)),
+    );
+
+    final DateTime? picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return _buildThemedPickerSheet(
+          title: "Select Date",
+          subtitle: "Schedule up to 3 days ahead",
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: options.map((date) {
+              final bool isSelected =
+                  _scheduledDate != null && _isSameDate(_scheduledDate!, date);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _pickerOptionTile(
+                  label: _dateOptionLabel(date, today),
+                  subtitle: _formatDate(date),
+                  isSelected: isSelected,
+                  onTap: () => Navigator.pop(context, date),
+                ),
+              );
+            }).toList(),
           ),
-          child: child!,
         );
       },
     );
+
     if (picked != null) {
-      setState(() => _scheduledDate = picked);
+      setState(() {
+        _scheduledDate = picked;
+        // The previously picked time was validated against the old
+        // date and may now be in the past (or otherwise invalid) for
+        // the newly picked date — clear it and make them re-pick.
+        _scheduledTime = null;
+      });
     }
   }
 
   Future<void> _pickScheduleTime() async {
-    final picked = await showTimePicker(
+    final DateTime baseDate = _scheduledDate ?? DateTime.now();
+    final DateTime minAllowed = DateTime.now().add(const Duration(minutes: 90));
+    final (openTime, _) = _operatingHours();
+
+    // Sensible starting position for the wheel: the currently picked
+    // time if there is one, else opening time — nudged forward to the
+    // earliest allowed instant if that falls before it (e.g. today,
+    // opening time has already passed).
+    DateTime initial = DateTime(
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
+      (_scheduledTime ?? openTime).hour,
+      (_scheduledTime ?? openTime).minute,
+    );
+    if (initial.isBefore(minAllowed)) initial = minAllowed;
+
+    final TimeOfDay? picked = await showModalBottomSheet<TimeOfDay>(
       context: context,
-      initialTime: TimeOfDay.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: primary,
-              onPrimary: creamText,
-              surface: bgColor,
-              onSurface: Colors.black,
-            ),
-          ),
-          child: child!,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        DateTime dialedTime = initial;
+        String? errorText;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return _buildThemedPickerSheet(
+              title: "Select Time",
+              subtitle: _scheduledDate != null
+                  ? _formatDate(_scheduledDate!)
+                  : null,
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: 190,
+                    child: CupertinoTheme(
+                      data: const CupertinoThemeData(
+                        brightness: Brightness.light,
+                        textTheme: CupertinoTextThemeData(
+                          dateTimePickerTextStyle: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ),
+                      child: CupertinoDatePicker(
+                        mode: CupertinoDatePickerMode.time,
+                        use24hFormat: false,
+                        initialDateTime: dialedTime,
+                        onDateTimeChanged: (dt) => setSheetState(() {
+                          dialedTime = dt;
+                          // Clear a stale error the moment they change
+                          // the dial — the old message no longer
+                          // necessarily applies to the new value.
+                          errorText = null;
+                        }),
+                      ),
+                    ),
+                  ),
+                  // Shown INSIDE the sheet itself (not a SnackBar) so it
+                  // can never end up rendered behind the popup — a
+                  // SnackBar anchors to the Scaffold underneath, which
+                  // sits below this modal sheet's own overlay layer.
+                  if (errorText != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFDECEA),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFFC62828),
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.error_outline_rounded,
+                            color: Color(0xFFC62828),
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              errorText!,
+                              style: const TextStyle(
+                                color: Color(0xFFB71C1C),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      onPressed: () {
+                        final TimeOfDay tod = TimeOfDay(
+                          hour: dialedTime.hour,
+                          minute: dialedTime.minute,
+                        );
+                        final DateTime candidate = DateTime(
+                          baseDate.year,
+                          baseDate.month,
+                          baseDate.day,
+                          tod.hour,
+                          tod.minute,
+                        );
+
+                        if (candidate.isBefore(minAllowed)) {
+                          setSheetState(
+                            () => errorText = "Select time 1.5h+ ahead.",
+                          );
+                          return;
+                        }
+                        if (!_isWithinOperatingHours(tod)) {
+                          setSheetState(
+                            () => errorText = "Outside operating hours.",
+                          );
+                          return;
+                        }
+                        Navigator.pop(context, tod);
+                      },
+                      child: const Text(
+                        "Confirm Time",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
 
     if (picked != null) {
-      if (!_isTimeWithinOperatingHours(picked)) {
-        _showThemedSnack("Outside operating hours.");
-        return;
-      }
-
-      final candidateDate = _scheduledDate ?? DateTime.now();
-      final candidateDateTime = DateTime(
-        candidateDate.year,
-        candidateDate.month,
-        candidateDate.day,
-        picked.hour,
-        picked.minute,
-      );
-      final minAllowedDateTime = DateTime.now().add(
-        const Duration(minutes: 90),
-      );
-
-      if (candidateDateTime.isBefore(minAllowedDateTime)) {
-        _showThemedSnack("Select time 1.5h+ ahead.");
-        return;
-      }
-
       setState(() => _scheduledTime = picked);
     }
   }
@@ -538,9 +851,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
       final String finalPaymentMethod = _paymentMode == 'COD'
           ? 'Cash On Delivery'
-          : (_selectedProvider == 'DeliveryPayment'
-                ? 'Delivery Payment (EasyPaisa/JazzCash)'
-                : (_selectedProvider ?? 'Online Payment'));
+          : (_selectedProvider ?? 'Online Payment');
 
       final String newOrderId = await _firestoreService.saveOrder(
         name: widget.userName,
@@ -552,12 +863,31 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         deliveryTime: deliveryTimeLabel,
         paymentMethod: finalPaymentMethod,
         cartItems: widget.cartItems,
-        transactionId: _transactionIdController.text.isNotEmpty
-            ? _transactionIdController.text
-            : "N/A",
+        // transactionId: _transactionIdController.text.isNotEmpty
+        //     ? _transactionIdController.text
+        //     : "N/A",
         branchId: activeBranchId,
         receiptImageUrl: receiptImageUrl,
       );
+
+      // Keep the user's profile in sync with whatever phone/address they
+      // just used at checkout, so Profile always shows the latest values
+      // instead of relying on the old "copy from last order" fallback.
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        try {
+          await FirebaseFirestore.instance.collection('users').doc(uid).set({
+            'phone_number': widget.userPhone,
+            'address': widget.addressDetails,
+            'lat': widget.selectedLocation.latitude,
+            'lng': widget.selectedLocation.longitude,
+          }, SetOptions(merge: true));
+        } catch (e) {
+          // Non-fatal: the order itself already succeeded above, so we
+          // don't want a profile-sync hiccup to look like a failed order.
+          debugPrint('Failed to sync phone/address to profile: $e');
+        }
+      }
 
       await _clearFirestoreCart();
       if (mounted) {
@@ -779,27 +1109,29 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               Container(
                 margin: const EdgeInsets.only(bottom: 14),
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+                  horizontal: 12,
+                  vertical: 7,
                 ),
                 decoration: BoxDecoration(
                   color: bgColor,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: Colors.black12),
                 ),
                 child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     const Icon(
                       Icons.access_time_filled_rounded,
                       color: primary,
-                      size: 16,
+                      size: 13,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
+                    const SizedBox(width: 6),
+                    Flexible(
                       child: Text(
                         "Hours: $_restaurantTiming",
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 12,
+                          fontSize: 10.5,
                           fontWeight: FontWeight.w600,
                           color: Colors.black87,
                         ),
@@ -962,42 +1294,255 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 value: 'COD',
               ),
               const Divider(height: 1, color: Colors.black12),
-              if (isLaterMode)
-                // Deliver Later: EasyPaisa/JazzCash are combined into one
-                // simple option — the specific screenshot/provider details
-                // are handled later from My Orders, not at checkout.
-                _paymentOptionTile(
-                  icon: Icons.receipt_long_rounded,
-                  title: "Delivery Payment",
-                  value: 'DeliveryPayment',
-                )
-              else ...[
-                _paymentOptionTile(
-                  icon: Icons.phone_android_rounded,
-                  title: "EasyPaisa",
-                  value: 'EasyPaisa',
-                ),
-                const Divider(height: 1, color: Colors.black12),
-                _paymentOptionTile(
-                  icon: Icons.smartphone_rounded,
-                  title: "JazzCash",
-                  value: 'JazzCash',
-                ),
-              ],
+              _onlinePaymentTile(isLaterMode: isLaterMode),
             ],
           ),
         ),
-        if (_selectedProvider != null) ...[
+        // Deliver Now still shows who to pay + the receipt upload inline,
+        // right below the selector, once a provider's been chosen in the
+        // popup. Deliver Later needs neither here — the "pay 1.5h before
+        // delivery" note now lives inside the popup itself, and receipt
+        // upload happens later from My Orders.
+        if (!isLaterMode &&
+            _paymentMode == 'Online' &&
+            _selectedProvider != null) ...[
           const SizedBox(height: 14),
-          if (isLaterMode)
-            _buildScheduledReceiptNotice()
-          else ...[
-            _buildReceiverInfoBanner(),
-            const SizedBox(height: 14),
-            _buildReceiptUploadUI(),
-          ],
+          _buildReceiverInfoBanner(),
+          const SizedBox(height: 14),
+          _buildReceiptUploadUI(),
         ],
       ],
+    );
+  }
+
+  // "Online Payment" no longer selects a provider by itself — tapping it
+  // opens the EasyPaisa/JazzCash picker popup instead. The subtitle below
+  // the title is the only inline confirmation of which provider is
+  // currently chosen, since the tile no longer expands into anything.
+  Widget _onlinePaymentTile({required bool isLaterMode}) {
+    final bool isSelected = _paymentMode == 'Online';
+    return InkWell(
+      onTap: () => _openProviderPicker(isLaterMode: isLaterMode),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Icon(
+              Icons.receipt_long_rounded,
+              size: 20,
+              color: isSelected ? primary : Colors.black54,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Online Payment",
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                      color: isSelected ? primary : Colors.black87,
+                    ),
+                  ),
+                  if (isSelected && _selectedProvider != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      "Selected: $_selectedProvider",
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? primary : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? primary : Colors.black38,
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Shared popup for both Deliver Now and Deliver Later — EasyPaisa /
+  // JazzCash choice. Deliver Later additionally shows the "pay 1.5h
+  // before delivery" note at the bottom.
+  void _openProviderPicker({required bool isLaterMode}) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
+          ),
+          child: Container(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              16,
+              20,
+              MediaQuery.of(sheetContext).padding.bottom + 20,
+            ),
+            decoration: const BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const Text(
+                  "Choose Payment Method",
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _providerOptionTile(
+                  sheetContext: sheetContext,
+                  icon: Icons.phone_android_rounded,
+                  title: "EasyPaisa",
+                ),
+                const SizedBox(height: 10),
+                _providerOptionTile(
+                  sheetContext: sheetContext,
+                  icon: Icons.smartphone_rounded,
+                  title: "JazzCash",
+                ),
+                if (isLaterMode) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: fieldBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: primary.withValues(alpha: 0.3)),
+                    ),
+                    child: const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          color: primary,
+                          size: 15,
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            "You can make the payment 1.5 hours before your "
+                            "scheduled delivery time.",
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.black87,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _providerOptionTile({
+    required BuildContext sheetContext,
+    required IconData icon,
+    required String title,
+  }) {
+    final bool isSelected = _selectedProvider == title;
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {
+        setState(() {
+          _paymentMode = 'Online';
+          _selectedProvider = title;
+          _imageFile = null;
+          _transactionIdController.clear();
+        });
+        Navigator.pop(sheetContext);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: isSelected ? primary.withValues(alpha: 0.08) : fieldBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? primary : Colors.black12,
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: isSelected ? primary : Colors.black54),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14.5,
+                  color: isSelected ? primary : Colors.black87,
+                ),
+              ),
+            ),
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? primary : Colors.transparent,
+                border: Border.all(
+                  color: isSelected ? primary : Colors.black38,
+                  width: 2,
+                ),
+              ),
+              child: isSelected
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1078,7 +1623,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               InkWell(
                 onTap: () {
                   Clipboard.setData(ClipboardData(text: _receiverPhone));
-                  _showThemedSnack("Number copied!");
+                  _showThemedSnack("Number copied!", isError: false);
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -1120,57 +1665,12 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               : Text(
                   _receiverPhone,
                   style: const TextStyle(
-                    fontSize: 18,
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
+                    letterSpacing: 0.5,
                     color: Colors.black87,
                   ),
                 ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScheduledReceiptNotice() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: fieldBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: primary.withValues(alpha: 0.3)),
-      ),
-      child: const Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.info_outline_rounded, color: primary, size: 18),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  "Payment through EasyPaisa or JazzCash.",
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(Icons.schedule_rounded, color: primary, size: 18),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  "Upload receipt 1.5 hours before delivery.",
-                  style: TextStyle(fontSize: 12.5, color: Colors.black87),
-                ),
-              ),
-            ],
-          ),
         ],
       ),
     );
@@ -1195,6 +1695,34 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           ],
         ),
         const SizedBox(height: 10),
+        // Container(
+        //   margin: const EdgeInsets.only(bottom: 10),
+        //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        //   decoration: BoxDecoration(
+        //     color: primary.withValues(alpha: 0.06),
+        //     borderRadius: BorderRadius.circular(10),
+        //     border: Border.all(color: primary.withValues(alpha: 0.25)),
+        //   ),
+        //   child: const Row(
+        //     crossAxisAlignment: CrossAxisAlignment.start,
+        //     children: [
+        //       Icon(Icons.info_outline_rounded, size: 14, color: primary),
+        //       SizedBox(width: 8),
+        //       Expanded(
+        //         child: Text(
+        //           "Please upload a clear payment screenshot with the sender "
+        //           "name, phone number, amount, and payment details visible.",
+        //           style: TextStyle(
+        //             fontSize: 11,
+        //             fontWeight: FontWeight.w500,
+        //             color: Colors.black87,
+        //             height: 1.3,
+        //           ),
+        //         ),
+        //       ),
+        //     ],
+        //   ),
+        // ),
         _imageFile != null
             ? _buildReceiptPreview()
             : GestureDetector(
@@ -1282,7 +1810,10 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: primary.withValues(alpha: 0.3), width: 1.5),
+              border: Border.all(
+                color: primary.withValues(alpha: 0.3),
+                width: 1.5,
+              ),
             ),
             child: Stack(
               fit: StackFit.expand,
@@ -1355,66 +1886,108 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
+  double get _itemsSubtotal => widget.cartItems.fold(
+    0.0,
+    (sum, item) => sum + (item.price * item.quantity),
+  );
+
+  double get _deliveryChargeForDisplay {
+    final fee = widget.totalAmount - _itemsSubtotal;
+    return fee < 0 ? 0 : fee;
+  }
+
+  Widget _summaryRow(String label, String value, {bool emphasize = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: emphasize ? 15 : 13.5,
+              fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500,
+              color: emphasize ? Colors.black87 : Colors.black54,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: emphasize ? 16 : 13.5,
+              fontWeight: FontWeight.bold,
+              color: emphasize ? primary : Colors.black87,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSummaryBar(int totalItemCount) {
+    final double itemsTotal = _itemsSubtotal;
+    final double deliveryCharge = _deliveryChargeForDisplay;
+    // Already the grand total from CartScreen — not recomputed here, so the
+    // number the user agreed to at checkout never silently changes.
+    final double grandTotal = widget.totalAmount;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: fieldBg,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.black12),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: primary.withValues(alpha: 0.3), width: 1.5),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            "Order Summary",
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black,
-            ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.receipt_long_rounded,
+                  color: primary,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                "Order Summary",
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "Total Items",
-                style: TextStyle(fontSize: 14, color: Colors.black54),
-              ),
-              Text(
-                "$totalItemCount",
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.black87,
-                ),
-              ),
-            ],
+          _summaryRow("Total Items", "$totalItemCount"),
+          _summaryRow(
+            "Delivery Charges",
+            deliveryCharge == 0
+                ? "FREE"
+                : "RS. ${deliveryCharge.toStringAsFixed(0)}",
           ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text(
-                "Grand Total",
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-              ),
-              Text(
-                "RS. ${widget.totalAmount.toStringAsFixed(0)}",
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: primary,
-                ),
-              ),
-            ],
+          _summaryRow("Total", "RS. ${itemsTotal.toStringAsFixed(0)}"),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 6),
+            child: Divider(height: 1, color: Colors.black12),
+          ),
+          _summaryRow(
+            "Grand Total",
+            "RS. ${grandTotal.toStringAsFixed(0)}",
+            emphasize: true,
           ),
           const SizedBox(height: 18),
           ElevatedButton(
             onPressed: (_isLoading || _isVerifyingImage)
                 ? null
-                : handleOrderConfirmation,
+                : _startOrderReview,
             style: ElevatedButton.styleFrom(
               backgroundColor: primary,
               foregroundColor: Colors.white,
@@ -1435,12 +2008,310 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                 : Text(
                     _deliveryMode == 'later'
                         ? "Confirm Schedule"
-                        : "Place Order",
+                        : "Confirm Order",
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startOrderReview() {
+    if (_deliveryMode.isEmpty) {
+      _showThemedSnack("Select delivery option.");
+      return;
+    }
+
+    if (_paymentMode == 'Online' && _selectedProvider == null) {
+      _showThemedSnack("Select payment method.");
+      return;
+    }
+
+    final bool needsReceipt =
+        _paymentMode == 'Online' && _deliveryMode != 'later';
+
+    if (needsReceipt && _imageFile == null) {
+      _showThemedSnack("Upload receipt screenshot.");
+      return;
+    }
+
+    if (_deliveryMode == 'later') {
+      if (_scheduledDate == null || _scheduledTime == null) {
+        _showThemedSnack("Select date and time.");
+        return;
+      }
+
+      final minAllowedDateTime = DateTime.now().add(
+        const Duration(minutes: 90),
+      );
+      if (_scheduledDateTime != null &&
+          _scheduledDateTime!.isBefore(minAllowedDateTime)) {
+        _showThemedSnack("Pick time 1.5h+ ahead.");
+        return;
+      }
+    }
+
+    _showOrderReviewSheet();
+  }
+
+  String get _reviewPaymentMethodLabel {
+    if (_paymentMode == 'COD') return 'Cash On Delivery';
+    return _selectedProvider ?? 'Online Payment';
+  }
+
+  String get _reviewDeliveryTimeLabel {
+    if (_deliveryMode == 'later' &&
+        _scheduledDate != null &&
+        _scheduledTime != null) {
+      return "${_formatDate(_scheduledDate!)} at ${_formatTime(_scheduledTime!)}";
+    }
+    return "As soon as possible";
+  }
+
+  void _showOrderReviewSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.75,
+          minChildSize: 0.5,
+          maxChildSize: 0.92,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              decoration: const BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+                    child: Row(
+                      children: [
+                        Text(
+                          "Review Your Order",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                      children: [
+                        if (_deliveryMode != 'later') ...[
+                          _reviewWarningBanner(),
+                          const SizedBox(height: 18),
+                        ],
+                        _reviewSectionLabel("Items"),
+                        const SizedBox(height: 6),
+                        // NOTE: assumes CartItem exposes a `name` getter,
+                        // matching how `item.quantity` is already used
+                        // elsewhere in this file. Adjust the field name
+                        // below if your CartItem model differs.
+                        ...widget.cartItems.map(
+                          (item) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    item.name,
+                                    style: const TextStyle(
+                                      fontSize: 13.5,
+                                      color: Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                                Text(
+                                  "x${item.quantity}",
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black54,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 14),
+                          child: Divider(height: 1, color: Colors.black12),
+                        ),
+                        _reviewSectionLabel("Delivery Address"),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.addressDetails,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _reviewSectionLabel("Delivery Time"),
+                        const SizedBox(height: 6),
+                        Text(
+                          _reviewDeliveryTimeLabel,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _reviewSectionLabel("Payment Method"),
+                        const SizedBox(height: 6),
+                        Text(
+                          _reviewPaymentMethodLabel,
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _reviewSectionLabel("Grand Total"),
+                        const SizedBox(height: 6),
+                        Text(
+                          "RS. ${widget.totalAmount.toStringAsFixed(0)}",
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.fromLTRB(
+                      20,
+                      12,
+                      20,
+                      MediaQuery.of(context).padding.bottom + 12,
+                    ),
+                    decoration: const BoxDecoration(
+                      border: Border(top: BorderSide(color: Colors.black12)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(sheetContext),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: primary),
+                              minimumSize: const Size(double.infinity, 46),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              "Edit Order",
+                              style: TextStyle(
+                                color: primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              Navigator.pop(sheetContext);
+                              handleOrderConfirmation();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primary,
+                              foregroundColor: Colors.white,
+                              minimumSize: const Size(double.infinity, 46),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: Text(
+                              _deliveryMode == 'later'
+                                  ? "Confirm Schedule"
+                                  : "Confirm & Place Order",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _reviewSectionLabel(String label) {
+    return Text(
+      label.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.bold,
+        letterSpacing: 0.6,
+        color: primary,
+      ),
+    );
+  }
+
+  Widget _reviewWarningBanner() {
+    const warningBg = Color(0xFFFFF3E0);
+    const warningBorder = Color(0xFFFFB74D);
+    const warningText = Color(0xFF8A5A00);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: warningBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: warningBorder, width: 1.2),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, color: warningText, size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Once placed, this order cannot be cancelled. Please review "
+              "the details below carefully before confirming.",
+              style: TextStyle(
+                color: warningText,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
           ),
         ],
       ),

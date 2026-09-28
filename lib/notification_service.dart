@@ -134,29 +134,34 @@ class NotificationService {
 
   // ── SCHEDULED RECEIPT-UPLOAD REMINDER ──
   // For a scheduled ('order later') order paid via Online payment, the
-  // customer doesn't upload their payment screenshot at checkout — they
-  // upload it 1 hour before the scheduled delivery time instead. This
-  // schedules a device-local notification (fires even if the app is
-  // closed) at that moment, reminding them to open the order and upload
-  // the receipt so it gets confirmed.
+  // customer doesn't upload their payment screenshot at checkout — the
+  // "Upload Receipt" button only unlocks 1h30m before the scheduled
+  // delivery time (see order_history_detail.dart's _isWithinUploadWindow,
+  // and GlobalPaymentReminderListener, which writes the matching in-app
+  // Notifications-screen entry at the same moment). This schedules a
+  // device-local notification (fires even if the app is closed) at that
+  // same 1h30m mark, as a fallback reminder in case the app isn't open
+  // when GlobalPaymentReminderListener would otherwise catch it.
   Future<void> scheduleReceiptUploadReminder({
     required String orderId,
     required DateTime scheduledOrderTime,
   }) async {
-    final reminderTime = scheduledOrderTime.subtract(const Duration(hours: 1));
+    final reminderTime = scheduledOrderTime.subtract(
+      const Duration(hours: 1, minutes: 30),
+    );
 
-    // If the order is already less than an hour away (or in the past),
-    // there's no "1 hour before" moment left to schedule — skip silently.
+    // If the order is already less than 1h30m away (or in the past),
+    // there's no "1h30m before" moment left to schedule — skip silently.
     if (reminderTime.isBefore(DateTime.now())) {
-      print('Receipt reminder skipped — scheduled time is under an hour away.');
+      print('Receipt reminder skipped — scheduled time is under 1h30m away.');
       return;
     }
 
     try {
       await _localNotifications.zonedSchedule(
         orderId.hashCode,
-        'Upload Your Payment Receipt',
-        'Your scheduled order is in 1 hour — upload your payment receipt now to confirm it.',
+        'Payment Now Available',
+        'You can now upload your payment for your scheduled order. It will only be confirmed once payment is completed.',
         tz.TZDateTime.from(reminderTime, tz.local),
         const NotificationDetails(
           android: AndroidNotificationDetails(

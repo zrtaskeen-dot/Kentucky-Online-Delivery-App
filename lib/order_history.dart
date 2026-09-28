@@ -63,6 +63,22 @@ List<Map<String, dynamic>> _readOrderItems(Map<String, dynamic> orderData) {
       .toList();
 }
 
+// Pakistan Standard Time is a fixed UTC+5 offset — Pakistan doesn't
+// observe daylight saving, so this is always correct regardless of the
+// device's own timezone setting. Converting through .toUtc() first makes
+// this safe even though Timestamp.toDate() already returns a DateTime in
+// the device's local zone.
+String _formatPakistaniDateTime(DateTime dateTime) {
+  final pkt = dateTime.toUtc().add(const Duration(hours: 5));
+  final day = pkt.day.toString().padLeft(2, '0');
+  final month = pkt.month.toString().padLeft(2, '0');
+  final hour24 = pkt.hour;
+  final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+  final minute = pkt.minute.toString().padLeft(2, '0');
+  final period = hour24 >= 12 ? 'PM' : 'AM';
+  return "$day/$month/${pkt.year} $hour12:$minute $period";
+}
+
 Stream<QuerySnapshot<Map<String, dynamic>>> _streamMyOrders() {
   final userId = FirebaseAuth.instance.currentUser?.uid ?? '';
   return FirebaseFirestore.instance
@@ -430,8 +446,7 @@ class _OrderCard extends StatelessWidget {
   String get _dateLabel {
     final ts = data['createdAt'] ?? data['order_date'];
     if (ts is Timestamp) {
-      final d = ts.toDate();
-      return "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}";
+      return _formatPakistaniDateTime(ts.toDate());
     }
     return "";
   }

@@ -13,7 +13,7 @@ class FirestoreService {
     required String deliveryTime,
     required String paymentMethod,
     required List<CartItem> cartItems,
-    required String transactionId,
+
     required String branchId,
     String?
     receiptImageUrl, // 👈 ADDED: Cloudinary URL of the payment receipt (Online payments only; null for COD)
@@ -53,7 +53,6 @@ class FirestoreService {
         'totalAmount': totalAmount,
         'deliveryTime': deliveryTime,
         'paymentMethod': paymentMethod,
-        'transactionId': transactionId,
         'latitude': latitude,
         'longitude': longitude,
         'items': itemsList,

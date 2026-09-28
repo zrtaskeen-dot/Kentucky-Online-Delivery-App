@@ -123,7 +123,14 @@ class RiderController extends ChangeNotifier {
           .collection('orders')
           .doc(orderId)
           .update({
+            // Only ever write the camelCase field now. The stray
+            // 'order_status' (snake_case) some other part of the system
+            // writes is what caused a document to end up with two
+            // conflicting status fields — deleting it here cleans up any
+            // order the rider touches, on top of the one-time migration
+            // that cleans up everything else already in the database.
             'orderStatus': 'Accepted',
+            'order_status': FieldValue.delete(),
             'riderId': riderId,
             'acceptedAt': FieldValue.serverTimestamp(),
           });
@@ -202,7 +209,10 @@ class RiderController extends ChangeNotifier {
       }
 
       await orderRef.update({
+        // Only the camelCase field from here on — see the comment in
+        // acceptOrder() above.
         'orderStatus': newStatus,
+        'order_status': FieldValue.delete(),
         'statusUpdatedAt': FieldValue.serverTimestamp(),
       });
 
@@ -232,6 +242,68 @@ class RiderController extends ChangeNotifier {
       _setLoading(false);
       return false;
     }
+  }
+
+  // ── ONE-TIME CLEANUP ──────────────────────────────────────────────
+  // Scans every order in the database and removes the stray
+  // 'order_status' (snake_case) field, keeping only 'orderStatus'
+  // (camelCase) as the single source of truth. Safe to run more than
+  // once — orders that only have 'orderStatus' are left untouched.
+  //
+  // Run this ONCE (e.g. from a temporary debug button), then it can be
+  // removed. Note: this only cleans up existing data — if whatever part
+  // of the system currently WRITES 'order_status' (order assignment,
+  // outside this file) isn't also updated to stop, that field will keep
+  // reappearing on newly-assigned orders.
+  Future<int> migrateOrderStatusField() async {
+    final firestore = FirebaseFirestore.instance;
+    final snapshot = await firestore.collection('orders').get();
+
+    int migratedCount = 0;
+    WriteBatch batch = firestore.batch();
+    int opsInBatch = 0;
+
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      if (!data.containsKey('order_status')) continue;
+
+      final camel = (data['orderStatus'] ?? '').toString();
+      final snake = (data['order_status'] ?? '').toString();
+
+      // Same "trust whichever isn't still 'pending'" rule used to read
+      // these fields elsewhere in the app, so the value that survives
+      // is the correct/current one, not whichever field happened to be
+      // written first.
+      String resolved;
+      if (snake.isNotEmpty && snake.toLowerCase() != 'pending') {
+        resolved = snake;
+      } else if (camel.isNotEmpty && camel.toLowerCase() != 'pending') {
+        resolved = camel;
+      } else {
+        resolved = camel.isNotEmpty ? camel : snake;
+      }
+
+      batch.update(doc.reference, {
+        'orderStatus': resolved,
+        'order_status': FieldValue.delete(),
+      });
+      migratedCount++;
+      opsInBatch++;
+
+      // Firestore batches cap at 500 writes.
+      if (opsInBatch == 450) {
+        await batch.commit();
+        batch = firestore.batch();
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+    }
+
+    debugPrint('Migration done: cleaned $migratedCount order(s).');
+    return migratedCount;
   }
 
   // 5. Launch Maps Navigation for Customer Address

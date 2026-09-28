@@ -13,7 +13,9 @@ class LiveTrackingScreen extends StatefulWidget {
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   static const primary = Color(0xFFA70000);
-  static const bgColor = Color(0xFFFCF8DD);
+  static const accentOrange = Color(0xFFFF8A00);
+  static const fieldBg = Color(0xFFFFFDFA);
+  static const bgColor = Colors.white;
 
   GoogleMapController? _mapController;
 
@@ -70,16 +72,20 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
-        backgroundColor: bgColor,
+        backgroundColor: primary,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: primary),
+          icon: const Icon(
+            Icons.arrow_back_rounded,
+            color: Colors.white,
+            size: 24,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: const Text(
           'Track Order',
           style: TextStyle(
-            color: Colors.black87,
+            color: Colors.white,
             fontWeight: FontWeight.bold,
             fontSize: 20,
           ),
@@ -191,10 +197,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   top: false,
                   child: Row(
                     children: [
-                      const CircleAvatar(
+                      CircleAvatar(
                         radius: 26,
-                        backgroundColor: Color(0xFFEEEEEE),
-                        child: Icon(
+                        backgroundColor: primary.withValues(alpha: 0.12),
+                        child: const Icon(
                           Icons.delivery_dining,
                           color: primary,
                           size: 28,
@@ -266,27 +272,63 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(color: primary),
-            const SizedBox(height: 24),
-            Text(
-              '$riderName has not enabled location yet',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 30),
+          decoration: BoxDecoration(
+            color: fieldBg,
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(
+              color: primary.withValues(alpha: 0.3),
+              width: 1.5,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  const SizedBox(
+                    width: 88,
+                    height: 88,
+                    child: CircularProgressIndicator(
+                      color: accentOrange,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: primary.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.delivery_dining,
+                      color: primary,
+                      size: 32,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Live tracking will start here automatically\nonce the rider turns on GPS.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-          ],
+              const SizedBox(height: 24),
+              Text(
+                "$riderName hasn't turned on location yet",
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Live tracking will start here automatically once the rider turns on GPS.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.4),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -6,6 +6,25 @@ import '../rider/rider_logic.dart';
 import '../notification_service.dart';
 import 'rider_profile.dart';
 
+// Orders in this app get their status written under two different field
+// names depending on which code path touched them — 'orderStatus'
+// (camelCase, set at checkout as e.g. 'pending') and 'order_status'
+// (snake_case, set by whatever assigns the order to a rider). A single
+// document can end up with BOTH fields present but holding DIFFERENT
+// values (e.g. orderStatus: 'pending', order_status: 'Assigned') — in
+// that case `data['orderStatus'] ?? data['order_status']` silently picks
+// the stale 'pending' value, because `??` only falls through on null,
+// not on "present but wrong". This resolves the real status by trusting
+// whichever field is NOT still sitting at that just-created 'pending'
+// default.
+String resolveOrderStatus(Map data) {
+  final camel = (data['orderStatus'] ?? '').toString();
+  final snake = (data['order_status'] ?? '').toString();
+  if (snake.isNotEmpty && snake.toLowerCase() != 'pending') return snake;
+  if (camel.isNotEmpty && camel.toLowerCase() != 'pending') return camel;
+  return camel.isNotEmpty ? camel : snake;
+}
+
 class RiderHomeScreen extends StatefulWidget {
   final String riderId;
   const RiderHomeScreen({super.key, required this.riderId});
@@ -32,16 +51,14 @@ class _EarningEntry {
 class _RiderHomeScreenState extends State<RiderHomeScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
-  // 👈 Matches Home screen's exact brand palette (maroon + orange + white)
-  static const primary = Color(
-    0xFFA70000,
-  ); // Maroon (same as Home) - icons always this color
-  static const accentOrange = Color(
-    0xFFFF8A00,
-  ); // Selected background circle (same as Home)
-  static const navBarBg = Color(
-    0xFFFFFDFA,
-  ); // bottom bar bg (same as Home's card tint)
+  // 👈 Matches main_navigation.dart's exact brand palette (maroon
+  // gradient + orange + cream), so the rider app's bottom nav looks
+  // like the customer app's instead of the old floating white pill.
+  static const primary = Color(0xFFA70000); // Maroon
+  static const primaryDark = Color(0xFF7A0000); // Gradient's darker end
+  static const accentOrange = Color(0xFFFF8A00); // Selected icon circle
+  static const _pendingRed = Color(0xFFD32F2F); // status buttons before tap
+  static const cream = Color(0xFFFFFDF2); // Unselected icon + badge border
   static const bgColor = Colors.white; // (same as Home)
 
   // Earnings filter — a custom date range only. Null start/end means no
@@ -85,68 +102,108 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     super.dispose();
   }
 
-  Widget _buildNavItem(IconData icon, int index) {
-    final bool isSelected = _currentIndex == index;
+  // Selected icon design — orange circle with a soft glow, white icon on
+  // top, matching main_navigation.dart exactly.
+  Widget selectedIcon(IconData icon) {
     return Container(
-      padding: const EdgeInsets.all(6),
+      width: 44,
+      height: 44,
       decoration: BoxDecoration(
-        color: isSelected ? accentOrange : Colors.transparent,
+        color: accentOrange,
         shape: BoxShape.circle,
+        border: Border.all(color: cream, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: accentOrange.withValues(alpha: 0.5),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Icon(icon, size: 22, color: primary),
+      child: Icon(icon, color: Colors.white, size: 21),
     );
   }
 
+  // Normal icon design — soft cream so it stays readable on the maroon bar.
+  Widget unselectedIcon(IconData icon) {
+    return Icon(icon, color: cream.withValues(alpha: 0.75), size: 22);
+  }
+
   // Same as _buildNavItem, but for the Orders tab specifically: overlays
-  // a small red count badge showing how many newly-assigned orders are
-  // waiting on this rider (orderStatus == 'Assigned', not yet
-  // accepted). The badge hides itself while the rider is already on the
-  // Orders tab — opening that tab is what counts as "having seen" the
-  // new orders — and reappears if a fresh one comes in while they're
-  // elsewhere in the app.
-  Widget _buildOrdersNavIcon(int index) {
+  // a small orange count badge showing how many newly-assigned orders are
+  // waiting on this rider (status == 'Assigned', not yet accepted). The
+  // badge hides itself while the rider is already on the Orders tab —
+  // opening that tab is what counts as "having seen" the new orders —
+  // and reappears if a fresh one comes in while they're elsewhere in
+  // the app.
+  //
+  // Checks BOTH 'orderStatus' and 'order_status' — until whatever
+  // assigns orders to riders (outside this file) is confirmed to only
+  // write 'orderStatus', a newly-assigned order could still land with
+  // order_status: 'Assigned' / orderStatus: 'pending', which a
+  // single-field query would silently miss. Once that's fixed and the
+  // one-time migration has run, this second query will simply always
+  // return empty — safe to simplify back to one query at that point.
+  Widget _buildOrdersNavIcon({required bool selected}) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('orders')
           .where('riderId', isEqualTo: widget.riderId)
           .where('orderStatus', isEqualTo: 'Assigned')
           .snapshots(),
-      builder: (context, snapshot) {
-        final int newOrdersCount = snapshot.data?.docs.length ?? 0;
-        final bool showBadge = newOrdersCount > 0 && _currentIndex != index;
+      builder: (context, camelSnapshot) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('orders')
+              .where('riderId', isEqualTo: widget.riderId)
+              .where('order_status', isEqualTo: 'Assigned')
+              .snapshots(),
+          builder: (context, snakeSnapshot) {
+            final newOrderIds = <String>{
+              ...?camelSnapshot.data?.docs.map((d) => d.id),
+              ...?snakeSnapshot.data?.docs.map((d) => d.id),
+            };
+            final int newOrdersCount = newOrderIds.length;
+            // Badge hides itself while already on the Orders tab —
+            // opening that tab counts as "having seen" the new orders.
+            final bool showBadge = newOrdersCount > 0 && !selected;
 
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            _buildNavItem(Icons.shopping_bag, index),
-            if (showBadge)
-              Positioned(
-                right: -2,
-                top: -2,
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  constraints: const BoxConstraints(
-                    minWidth: 16,
-                    minHeight: 16,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: navBarBg, width: 1.5),
-                  ),
-                  child: Text(
-                    newOrdersCount > 9 ? '9+' : '$newOrdersCount',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                      height: 1,
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                selected
+                    ? selectedIcon(Icons.shopping_bag)
+                    : unselectedIcon(Icons.shopping_bag),
+                if (showBadge)
+                  Positioned(
+                    right: selected ? -2 : -5,
+                    top: selected ? -2 : -5,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      constraints: const BoxConstraints(
+                        minWidth: 14,
+                        minHeight: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accentOrange,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cream, width: 1.5),
+                      ),
+                      child: Text(
+                        newOrdersCount > 9 ? '9+' : '$newOrdersCount',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          height: 1,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-          ],
+              ],
+            );
+          },
         );
       },
     );
@@ -165,23 +222,25 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
             return RiderProfileScreen(riderId: widget.riderId);
           },
         ),
-        bottomNavigationBar: SafeArea(
-          child: Container(
-            height: 68,
-            margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            decoration: BoxDecoration(
-              color: navBarBg,
-              borderRadius: BorderRadius.circular(25),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.1),
-                  blurRadius: 8,
-                  offset: const Offset(0, 3),
-                ),
-              ],
+        bottomNavigationBar: Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [primary, primaryDark],
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(25),
+            boxShadow: [
+              BoxShadow(
+                color: primary.withValues(alpha: 0.3),
+                blurRadius: 16,
+                offset: const Offset(0, -4),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              height: 66,
               child: Theme(
                 data: Theme.of(context).copyWith(
                   splashColor: Colors.transparent,
@@ -190,21 +249,29 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                 child: BottomNavigationBar(
                   currentIndex: _currentIndex,
                   onTap: (i) => setState(() => _currentIndex = i),
+                  type: BottomNavigationBarType.fixed,
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  selectedItemColor: accentOrange,
+                  unselectedItemColor: cream.withValues(alpha: 0.75),
                   showSelectedLabels: false,
                   showUnselectedLabels: false,
-                  backgroundColor: navBarBg,
-                  type: BottomNavigationBarType.fixed,
+                  selectedFontSize: 0,
+                  unselectedFontSize: 0,
                   items: [
                     BottomNavigationBarItem(
-                      icon: _buildNavItem(Icons.home, 0),
+                      icon: unselectedIcon(Icons.home),
+                      activeIcon: selectedIcon(Icons.home),
                       label: 'Home',
                     ),
                     BottomNavigationBarItem(
-                      icon: _buildOrdersNavIcon(1),
+                      icon: _buildOrdersNavIcon(selected: false),
+                      activeIcon: _buildOrdersNavIcon(selected: true),
                       label: 'Orders',
                     ),
                     BottomNavigationBarItem(
-                      icon: _buildNavItem(Icons.account_circle, 2),
+                      icon: unselectedIcon(Icons.account_circle),
+                      activeIcon: selectedIcon(Icons.account_circle),
                       label: 'Profile',
                     ),
                   ],
@@ -677,6 +744,24 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     );
   }
 
+  // ── TEMPORARY: runs the one-time order_status field cleanup and
+  // shows how many orders were fixed. Remove this + the button above
+  // once you've confirmed it worked.
+  Future<void> _runOrderStatusMigration(RiderController rc) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) =>
+          const Center(child: CircularProgressIndicator(color: primary)),
+    );
+    final count = await rc.migrateOrderStatusField();
+    if (!mounted) return;
+    Navigator.pop(context); // close the loading dialog
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Cleaned up $count order(s).')));
+  }
+
   Widget _buildDashboardTab(RiderController rc) {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
@@ -791,6 +876,28 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                 ),
               ),
               const SizedBox(height: 40),
+
+              // ── TEMPORARY: one-time cleanup button ──────────────────
+              // Removes the old 'order_status' (snake_case) field from
+              // every existing order in the database, leaving only
+              // 'orderStatus'. Tap this once, confirm in Firestore
+              // Console that the field is gone from your orders, then
+              // delete this button + _runOrderStatusMigration below.
+              // Padding(
+              //   padding: const EdgeInsets.symmetric(horizontal: 16),
+              //   child: OutlinedButton.icon(
+              //     onPressed: () => _runOrderStatusMigration(rc),
+              //     icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+              //     label: const Text(
+              //       "One-time: clean up order_status field",
+              //     ),
+              //     style: OutlinedButton.styleFrom(
+              //       foregroundColor: Colors.black54,
+              //       side: const BorderSide(color: Colors.black26),
+              //     ),
+              //   ),
+              // ),
+              const SizedBox(height: 40),
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('orders')
@@ -810,8 +917,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                     totalOrders = docs.length;
                     for (var doc in docs) {
                       final orderData = doc.data() as Map<String, dynamic>;
-                      final status =
-                          orderData['orderStatus'] ?? orderData['order_status'];
+                      final status = resolveOrderStatus(orderData);
                       if (status == 'Delivered') {
                         delivered++;
                         // Rider's earning for a delivered order = its bill.
@@ -1018,12 +1124,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
             final allDocs = snapshot.data!.docs;
             final assignedDocs = allDocs.where((d) {
               final data = d.data() as Map;
-              final s = data['orderStatus'] ?? data['order_status'];
-              return s == 'Assigned';
+              return resolveOrderStatus(data) == 'Assigned';
             }).toList();
             final acceptedDocs = allDocs.where((d) {
               final data = d.data() as Map;
-              final s = data['orderStatus'] ?? data['order_status'];
+              final s = resolveOrderStatus(data);
               return s == 'Accepted' ||
                   s == 'Delivery Started' ||
                   s == 'Picked Up' ||
@@ -1117,7 +1222,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     final firstImage = items.isNotEmpty
         ? (items[0] as Map)['imageUrl'] ?? ''
         : '';
-    final status = data['orderStatus'] ?? data['order_status'] ?? '';
+    final status = resolveOrderStatus(data);
     final customerId = data['customerId'] ?? data['userId'] ?? '';
 
     return GestureDetector(
@@ -1361,7 +1466,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     final phone = data['phoneNumber'] ?? data['phone_number'] ?? '';
     final lat = data['latitude'];
     final lng = data['longitude'];
-    final currentStatus = data['orderStatus'] ?? data['order_status'] ?? '';
+    final currentStatus = resolveOrderStatus(data);
     final customerId =
         data['customerId'] ?? data['userId'] ?? ''; // 👈 Extracted customerId
 
@@ -1483,9 +1588,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                           width: double.infinity,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
+                              // Red until tapped, orange once started.
                               backgroundColor: started
-                                  ? primary.withValues(alpha: 0.35)
-                                  : primary,
+                                  ? accentOrange
+                                  : _pendingRed,
+                              disabledBackgroundColor: accentOrange,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
@@ -1494,16 +1601,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                             ),
                             icon: Icon(
                               Icons.local_shipping_rounded,
-                              color: Colors.white.withValues(
-                                alpha: started ? 0.7 : 1,
-                              ),
+                              color: Colors.white,
                             ),
-                            label: Text(
+                            label: const Text(
                               'Start Delivery',
                               style: TextStyle(
-                                color: Colors.white.withValues(
-                                  alpha: started ? 0.7 : 1,
-                                ),
+                                color: Colors.white,
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1610,10 +1713,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     final bool isDone = currentIndex >= targetIndex;
     final bool isActive = started && !isDone && currentIndex == targetIndex - 1;
 
+    // Red until the rider taps it; orange once done. (The per-button
+    // `color` argument is no longer used for the fill.)
     Color background;
     Widget label_;
     if (isDone) {
-      background = color.withValues(alpha: 0.35);
+      background = accentOrange;
       label_ = Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -1631,7 +1736,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         ],
       );
     } else if (isActive) {
-      background = color;
+      background = _pendingRed;
       label_ = Text(
         label,
         style: const TextStyle(
@@ -1642,7 +1747,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         ),
       );
     } else {
-      background = color.withValues(alpha: 0.25);
+      background = _pendingRed.withValues(
+        alpha: 0.45,
+      ); // locked (not yet tappable)
       label_ = Text(
         label,
         style: TextStyle(
@@ -1659,6 +1766,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
           backgroundColor: background,
+          disabledBackgroundColor: background,
           padding: const EdgeInsets.symmetric(vertical: 14),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -1674,35 +1782,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                 if (!context.mounted) return;
                 if (success) {
                   onSuccess(targetStatus);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      behavior: SnackBarBehavior.floating,
-                      backgroundColor: primary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      margin: const EdgeInsets.all(14),
-                      content: Row(
-                        children: [
-                          const Icon(
-                            Icons.check_circle_rounded,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Order marked as $label',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
+                  _showTopBanner(context, 'Order marked as $label');
                 } else {
                   _showOneDeliveryDialog(context, rc.error);
                 }
@@ -1884,6 +1964,123 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── Top-of-screen message banner ─────────────────────────────────────
+// Shown on the ROOT overlay so it sits above bottom sheets/dialogs, at
+// the top of the screen where it's easy to see (a normal SnackBar
+// renders at the bottom, hidden behind the order-details bottom sheet).
+void _showTopBanner(
+  BuildContext context,
+  String message, {
+  Color color = const Color(0xFFA70000), // app maroon
+}) {
+  final overlay = Overlay.of(context, rootOverlay: true);
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) =>
+        _TopBanner(message: message, color: color, onDone: entry.remove),
+  );
+  overlay.insert(entry);
+}
+
+class _TopBanner extends StatefulWidget {
+  final String message;
+  final Color color;
+  final VoidCallback onDone;
+  const _TopBanner({
+    required this.message,
+    required this.color,
+    required this.onDone,
+  });
+
+  @override
+  State<_TopBanner> createState() => _TopBannerState();
+}
+
+class _TopBannerState extends State<_TopBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.forward();
+    Future.delayed(const Duration(milliseconds: 2600), () async {
+      if (!mounted) return;
+      await _ctrl.reverse();
+      if (mounted) widget.onDone();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 10,
+      left: 14,
+      right: 14,
+      child: IgnorePointer(
+        child: FadeTransition(
+          opacity: _ctrl,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -0.6),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut)),
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.check_circle_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        widget.message,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

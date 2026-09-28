@@ -7,7 +7,7 @@ import 'forgot_password.dart';
 import 'rider/rider_home_screen.dart';
 import 'main_navigation.dart';
 import 'signup_screen.dart';
-import 'fcm_service.dart'; // 👈 ADDED
+import 'fcm_service.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -32,11 +32,43 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
 
-  // 👈 Matches Home screen's exact brand palette (maroon + white + card tint)
   static const Color bgColor = Colors.white;
   static const Color themeColor = Color(0xFFA70000); // Maroon (same as Home)
   static const Color creamColor = Color(0xFFFEF9E7);
   static const Color fieldColor = Color(0xFFFFFDFA); // same as Home's card tint
+
+  static const Color successBorder = Color(0xFF4A7C59);
+  static const Color successBg = Color(0xFFEAF3ED);
+  static const Color successText = Color(0xFF2F5B3E);
+  static const Color errorBorder = Color(0xFFC62828);
+  static const Color errorBg = Color(0xFFFDECEA);
+  static const Color errorText = Color(0xFFB71C1C);
+
+  // Maps a role keyword to its doc id in the 'user_role' collection.
+  // Keep this in sync with signup_screen.dart's roleMap — 'users'
+  // documents store only the roleID (e.g. 'R001'), never the role
+  // text itself.
+  static const Map<String, String> roleMap = {
+    'customer': 'R001',
+    'rider': 'R002',
+    'admin': 'R003',
+  };
+
+  // Looks up the human-readable role name from 'user_role' (doc id ==
+  // roleID) whenever the actual text is needed — e.g. for display or
+  // logging. Falls back to an empty string if the lookup fails.
+  Future<String> _fetchRoleName(String roleID) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('user_role')
+          .doc(roleID)
+          .get();
+      return (doc.data()?['rolename'] ?? '').toString();
+    } catch (e) {
+      debugPrint('Failed to fetch role name for $roleID: $e');
+      return '';
+    }
+  }
 
   @override
   void dispose() {
@@ -45,14 +77,40 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Default snackbar background now matches the app's maroon theme
-  // instead of the previous red, so error/info messages look
-  // consistent with the rest of the UI.
-  void _showSnack(String msg, {Color color = themeColor}) {
+  void _showSnack(String msg, {bool isError = true}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: color));
+    final borderColor = isError ? errorBorder : successBorder;
+    final fillColor = isError ? errorBg : successBg;
+    final textColor = isError ? errorText : successText;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Text(
+            msg,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   // ────────────────────────────────────────────────────────────
@@ -75,18 +133,12 @@ class _LoginScreenState extends State<LoginScreen> {
         'created_at': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection("system_log").add(payload);
-      await FirebaseFirestore.instance
-          .collection("activity_logs")
-          .add(payload);
+      await FirebaseFirestore.instance.collection("activity_logs").add(payload);
     } catch (e) {
       // Logging failure should never block login flow.
       debugPrint('Activity log failed: $e');
     }
   }
-
-  // ────────────────────────────────────────────────────────────
-  // GUEST FLOW — anonymous Firebase login + cart migration
-  // ────────────────────────────────────────────────────────────
 
   Future<void> _continueAsGuest() async {
     setState(() => _isLoading = true);
@@ -155,8 +207,9 @@ class _LoginScreenState extends State<LoginScreen> {
     final password = _passwordController.text.trim();
 
     final prevUser = FirebaseAuth.instance.currentUser;
-    final String? guestUid =
-        (prevUser != null && prevUser.isAnonymous) ? prevUser.uid : null;
+    final String? guestUid = (prevUser != null && prevUser.isAnonymous)
+        ? prevUser.uid
+        : null;
 
     try {
       final userCredential = await FirebaseAuth.instance
@@ -165,7 +218,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!user.emailVerified) {
         await FirebaseAuth.instance.signOut();
-        _showSnack("Email not verified. Please check your inbox and verify.");
+        _showSnack("Email not verified. Please check your inbox.");
         return;
       }
 
@@ -174,23 +227,43 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (widget.role == 'rider') {
-        final snapshot = await FirebaseFirestore.instance
-            .collection('users')
-            .where('email', isEqualTo: email)
-            .where('role', isEqualTo: 'rider')
-            .get();
+        // Looking the account up by the signed-in user's own uid (instead
+        // of a Firestore query on the 'email' + 'roleID' fields) fixes
+        // two real ways a rider whose account genuinely exists could get
+        // "Rider account not found": (1) the stored 'email' field having
+        // different casing than what they just typed — Firebase Auth
+        // itself is case-insensitive so sign-in succeeds, but an exact
+        // Firestore string match on 'email' then silently misses; and
+        // (2) riders created through an older admin flow that only ever
+        // set a legacy 'role' text field, never the newer 'roleID' this
+        // query required. Fetching by uid can't miss on casing, and we
+        // check both the current 'roleID' and that legacy 'role' field.
+        DocumentSnapshot<Map<String, dynamic>> riderDoc;
+        try {
+          riderDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+        } catch (e) {
+          await FirebaseAuth.instance.signOut();
+          _showSnack("Could not verify your account. Please try again.");
+          return;
+        }
 
-        if (snapshot.docs.isEmpty) {
+        final riderData = riderDoc.data();
+        final roleID = (riderData?['roleID'] ?? '').toString();
+        final legacyRole = (riderData?['role'] ?? '').toString().toLowerCase();
+        final isRider = roleID == roleMap['rider'] || legacyRole == 'rider';
+
+        if (riderData == null || !isRider) {
           await FirebaseAuth.instance.signOut();
           _showSnack("Rider account not found. Please contact admin.");
           return;
         }
 
-        final riderDoc = snapshot.docs.first;
         final riderId = riderDoc.id;
-        final riderData = riderDoc.data();
-        final riderName =
-            (riderData['name'] ?? riderData['fullName'] ?? email).toString();
+        final riderName = (riderData['name'] ?? riderData['fullName'] ?? email)
+            .toString();
         final branchName = (riderData['branch'] ?? '').toString();
 
         // 👈 ADDED: block-check — admin ne is rider ko block kiya ho to
@@ -209,12 +282,9 @@ class _LoginScreenState extends State<LoginScreen> {
             .doc(riderId)
             .update({'emailVerified': true});
 
-        // 👈 ADDED: without this, the FCM token never reaches
-        // Firestore, so the backend has nothing to send push
-        // notifications to.
         await FcmService.syncDeviceToken(riderId);
 
-        // 👈 ADDED: log rider login
+        //  rider login
         await _logActivity(
           action: 'Rider Login',
           performedBy: riderName,
@@ -229,27 +299,29 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (_) => RiderHomeScreen(riderId: riderId)),
         );
       } else {
-        final snapshot = await FirebaseFirestore.instance
-            .collection('users')
-            .where('email', isEqualTo: email)
-            .get();
+        DocumentSnapshot<Map<String, dynamic>> userDoc;
+        try {
+          userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+        } catch (e) {
+          await FirebaseAuth.instance.signOut();
+          _showSnack("Could not verify your account. Please try again.");
+          return;
+        }
 
-        // 👈 ADDED: agar admin ne is user (owner/customer) ka record
-        // delete kar diya ho, to Auth account zinda hone ke bawajood
-        // login yahin rok dein.
-        if (snapshot.docs.isEmpty) {
+        if (!userDoc.exists) {
           await FirebaseAuth.instance.signOut();
           _showSnack("Account not found. Please contact admin.");
           return;
         }
 
-        final userId = snapshot.docs.first.id;
-        final userData = snapshot.docs.first.data();
-        final customerName =
-            (userData['name'] ?? userData['fullName'] ?? email).toString();
+        final userId = userDoc.id;
+        final userData = userDoc.data()!;
+        final customerName = (userData['name'] ?? userData['fullName'] ?? email)
+            .toString();
 
-        // 👈 ADDED: block-check — admin ne is user ko block kiya ho to
-        // login yahin rok dein.
         final userStatus = (userData['status'] ?? 'active').toString();
         if (userStatus == 'blocked') {
           await FirebaseAuth.instance.signOut();
@@ -259,10 +331,9 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .update({'emailVerified': true});
+        await FirebaseFirestore.instance.collection('users').doc(userId).update(
+          {'emailVerified': true},
+        );
 
         // 👈 ADDED: save this device's FCM token now that we know
         // who's logged in.
@@ -274,7 +345,8 @@ class _LoginScreenState extends State<LoginScreen> {
           performedBy: customerName,
           role: widget.role == 'owner' ? 'Owner' : 'Customer',
           branch: '',
-          details: '${widget.role == 'owner' ? 'Owner' : 'Customer'} "$customerName" logged in to the app',
+          details:
+              '${widget.role == 'owner' ? 'Owner' : 'Customer'} "$customerName" logged in to the app',
         );
 
         if (!mounted) return;
@@ -305,8 +377,9 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     final prevUser = FirebaseAuth.instance.currentUser;
-    final String? guestUid =
-        (prevUser != null && prevUser.isAnonymous) ? prevUser.uid : null;
+    final String? guestUid = (prevUser != null && prevUser.isAnonymous)
+        ? prevUser.uid
+        : null;
 
     try {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
@@ -342,7 +415,10 @@ class _LoginScreenState extends State<LoginScreen> {
           await userDoc.set({
             'name': user.displayName ?? '',
             'email': user.email ?? '',
-            'role': 'customer',
+            // roleID is the source of truth — look up the display
+            // name from 'user_role' (doc id == roleID) via
+            // _fetchRoleName whenever the role text itself is needed.
+            'roleID': roleMap['customer'],
             'createdAt': FieldValue.serverTimestamp(),
             'emailVerified': true,
           });
@@ -354,8 +430,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await FcmService.syncDeviceToken(user.uid);
 
         // 👈 ADDED: log customer login (google)
-        final googleName =
-            (user.displayName ?? user.email ?? '').toString();
+        final googleName = (user.displayName ?? user.email ?? '').toString();
         await _logActivity(
           action: 'Customer Login',
           performedBy: googleName,
@@ -510,8 +585,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextButton.styleFrom(
                                 padding: EdgeInsets.zero,
                                 minimumSize: Size.zero,
-                                tapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               child: const Text(
                                 "Sign up",
@@ -631,7 +705,10 @@ class _LoginScreenState extends State<LoginScreen> {
         controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
-        style: const TextStyle(fontWeight: FontWeight.w500, color: Colors.black87),
+        style: const TextStyle(
+          fontWeight: FontWeight.w500,
+          color: Colors.black87,
+        ),
         validator: validator,
         decoration: InputDecoration(
           filled: true,
@@ -664,7 +741,10 @@ class _LoginScreenState extends State<LoginScreen> {
         Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 12),
-          child: Text("or", style: TextStyle(color: Colors.black45, fontSize: 12)),
+          child: Text(
+            "or",
+            style: TextStyle(color: Colors.black45, fontSize: 12),
+          ),
         ),
         Expanded(child: Divider(color: Colors.black.withValues(alpha: 0.15))),
       ],

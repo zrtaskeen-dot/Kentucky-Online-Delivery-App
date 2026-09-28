@@ -107,9 +107,14 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
 
   Future<void> _fetchToppings() async {
     try {
+      // NOTE: assumes topping documents carry a `branchId` field, the
+      // same way cart entries do (see 'branchId': widget.selectedBranchId
+      // below) — adjust the field name here if your toppings collection
+      // uses a different one.
       final snap = await FirebaseFirestore.instance
           .collection('toppings')
           .where('category', isEqualTo: widget.item.category)
+          .where('branchId', isEqualTo: widget.selectedBranchId)
           .get();
 
       setState(() {

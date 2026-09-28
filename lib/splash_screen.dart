@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'onboarding/page1.dart';
 import 'onboarding/page3.dart';
 import 'main_navigation.dart'; // Adjust path based on your folder structure
 import 'rider/rider_home_screen.dart';
@@ -158,14 +160,22 @@ class _SplashScreenState extends State<SplashScreen>
       }
     }
 
-    // Agar User Logged in nahi hai to Role Selection screen (OnboardPage3) par bhejen
+    // Agar user logged in nahi hai: pehli baar app kholne wale ko
+    // Page 1 (onboarding intro) se shuru karayein; jinhon ne onboarding
+    // pehle dekh li hai unhe seedha Role Selection screen (OnboardPage3)
+    // par bhejein, jaisa pehle hota tha.
+    final prefs = await SharedPreferences.getInstance();
+    final seenOnboarding = prefs.getBool('has_seen_onboarding') ?? false;
+
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 500),
-        pageBuilder: (_, animation, __) =>
-            FadeTransition(opacity: animation, child: const OnboardPage3()),
+        pageBuilder: (_, animation, __) => FadeTransition(
+          opacity: animation,
+          child: seenOnboarding ? const OnboardPage3() : const OnboardPage1(),
+        ),
       ),
     );
   }

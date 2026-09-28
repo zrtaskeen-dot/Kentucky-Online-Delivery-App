@@ -21,16 +21,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // Brand theme colors — matches the bottom nav bar (maroon + orange + white)
-  static const primary = Color(0xFFFF8A00); // Brand Orange
-  static const maroon = Color(0xFFA70000); // Brand Maroon
-  static const bgColor = Colors.white; // 👈 Pure white page background
+  
+  static const primary = Color(0xFFFF8A00); 
+  static const maroon = Color(0xFFA70000); 
+  static const bgColor = Colors.white; 
   static const itemCardColor = Color(
     0xFFFFFDFA,
-  ); // 👈 Very light, near-white cards (matches reference look)
+  );
   static const lightMaroonBorder = Color(
     0x33A70000,
-  ); // 👈 Very light subtle maroon outline (~20% opacity)
+  ); 
 
   int selectedCategoryIndex = 0;
   List<FoodItem> allItems = [];
@@ -144,7 +144,18 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       isSearching = query.isNotEmpty;
       if (isSearching) {
-        searchResults = allItems
+        final scopedItems = selectedCategoryIndex == 0
+            ? allItems
+            : allItems
+                  .where(
+                    (item) => _categoryMatches(
+                      item.category,
+                      categories[selectedCategoryIndex],
+                    ),
+                  )
+                  .toList();
+
+        searchResults = scopedItems
             .where((item) => item.name.toLowerCase().startsWith(query))
             .toList();
       } else {

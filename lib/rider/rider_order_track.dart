@@ -38,6 +38,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   static const bg = Colors.white; 
   static const bannerBg = Color(0xFFFFF6DA);
   static const orangeAccent = Color(0xFFFF8A00); 
+  static const _pendingRed = Color(0xFFD32F2F);
 
   GoogleMapController? _mapController;
   LatLng? _riderLatLng;
@@ -54,8 +55,14 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
 
   // Same sequence used elsewhere in the app — keep in sync with
   // functions/index.js STATUS_MESSAGES and rider_logic.dart's queries.
+  // 👈 FIX: 'Delivery Started' was missing here, so once a rider tapped
+  // "Start Delivery" (which writes orderStatus: 'Delivery Started'),
+  // indexOf() returned -1 and currentIndex fell back to 0 — making this
+  // screen's status buttons look reset/out of sync with the actual
+  // order status. Now matches rider_home_screen.dart's sequence.
   static const List<String> _statusSequence = [
     'Accepted',
+    'Delivery Started',
     'Picked Up',
     'On the Way',
     'Delivered',
@@ -315,18 +322,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     if (!mounted) return;
     setState(() => _isUpdating = false);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          success ? 'Status updated: $newStatus' : 'Failed to update status',
-        ),
-        // 👈 Every button-click message uses the app's maroon theme color
-        // now, instead of green/red, for a consistent look.
-        backgroundColor: primary,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+    // Shown at the TOP of the screen (maroon) so it's easy to see.
+    _showTopBanner(
+      context,
+      success ? 'Order marked as $newStatus' : 'Failed to update status',
     );
 
     if (success && newStatus == 'Delivered') {
@@ -342,7 +341,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
   }) {
     final isDone = statusIndex <= currentIndex;
     final isActive = statusIndex == currentIndex + 1;
-    final isReachable = isDone || isActive;
 
     return SizedBox(
       width: double.infinity,
@@ -351,13 +349,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
             ? () => _updateStatus(_statusSequence[statusIndex])
             : null,
         style: ElevatedButton.styleFrom(
-          // 👈 Light shade of the same color when not yet reachable,
-          // full solid color once it's active or already done — no
-          // separate green "done" tint, as requested.
-          backgroundColor: isReachable ? color : color.withValues(alpha: 0.35),
-          disabledBackgroundColor: isReachable
-              ? color
-              : color.withValues(alpha: 0.35),
+          // Red until tapped (faded while still locked), orange once done.
+          backgroundColor: isDone
+              ? orangeAccent
+              : (isActive ? _pendingRed : _pendingRed.withValues(alpha: 0.45)),
+          disabledBackgroundColor: isDone
+              ? orangeAccent
+              : (isActive ? _pendingRed : _pendingRed.withValues(alpha: 0.45)),
           padding: const EdgeInsets.symmetric(vertical: 16),
           elevation: isActive ? 3 : 0,
           shape: RoundedRectangleBorder(
@@ -500,21 +498,26 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
                           _buildStatusButton(
                             label: 'PICKED UP',
                             color: primary,
-                            statusIndex: 1,
+                            // 👈 FIX: was hardcoded 1, which pointed at
+                            // 'Delivery Started' after that status was
+                            // added to the sequence above. Using
+                            // indexOf() keeps this correct even if the
+                            // sequence changes again.
+                            statusIndex: _statusSequence.indexOf('Picked Up'),
                             currentIndex: currentIndex,
                           ),
                           const SizedBox(height: 8),
                           _buildStatusButton(
                             label: 'ON THE WAY',
                             color: primary,
-                            statusIndex: 2,
+                            statusIndex: _statusSequence.indexOf('On the Way'),
                             currentIndex: currentIndex,
                           ),
                           const SizedBox(height: 8),
                           _buildStatusButton(
                             label: 'DELIVERED',
                             color: orangeAccent,
-                            statusIndex: 3,
+                            statusIndex: _statusSequence.indexOf('Delivered'),
                             currentIndex: currentIndex,
                           ),
                         ],
@@ -526,6 +529,116 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+// ── Top-of-screen message banner ─────────────────────────────────────
+// Shown on the ROOT overlay so it sits above bottom sheets/dialogs, at
+// the top of the screen where it's easy to see (a normal SnackBar
+// renders at the bottom, hidden behind the order-details bottom sheet).
+void _showTopBanner(
+  BuildContext context,
+  String message, {
+  Color color = const Color(0xFFA70000), // app maroon
+}) {
+  final overlay = Overlay.of(context, rootOverlay: true);
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) => _TopBanner(message: message, color: color, onDone: entry.remove),
+  );
+  overlay.insert(entry);
+}
+
+class _TopBanner extends StatefulWidget {
+  final String message;
+  final Color color;
+  final VoidCallback onDone;
+  const _TopBanner({
+    required this.message,
+    required this.color,
+    required this.onDone,
+  });
+
+  @override
+  State<_TopBanner> createState() => _TopBannerState();
+}
+
+class _TopBannerState extends State<_TopBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.forward();
+    Future.delayed(const Duration(milliseconds: 2600), () async {
+      if (!mounted) return;
+      await _ctrl.reverse();
+      if (mounted) widget.onDone();
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 10,
+      left: 14,
+      right: 14,
+      child: IgnorePointer(
+        child: FadeTransition(
+          opacity: _ctrl,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, -0.6),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut)),
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.25),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded,
+                        color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        widget.message,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

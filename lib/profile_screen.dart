@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
@@ -182,8 +183,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  // Same 10-digit-after-+92 rule as checkout — kept here too so a number
+  // saved directly from Profile is just as valid as one saved via an
+  // order, since checkout now reads its default phone from this profile.
+  String _localPhoneDigits(String raw) {
+    final digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 10) return digits.substring(digits.length - 10);
+    return digits;
+  }
+
   void _editField(String fieldKey, String fieldLabel, String currentValue) {
-    final controller = TextEditingController(text: currentValue);
+    final isPhone = fieldKey == 'phone_number';
+    final controller = TextEditingController(
+      text: isPhone ? _localPhoneDigits(currentValue) : currentValue,
+    );
     final iconMap = {
       'name': Icons.person_outline_rounded,
       'phone_number': Icons.phone_outlined,
@@ -206,168 +219,208 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       },
       pageBuilder: (ctx, _, __) {
-        return Center(
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 28),
-              padding: const EdgeInsets.all(28),
-              decoration: BoxDecoration(
-                color: bgColor, // CHANGED: cream instead of white
-                borderRadius: BorderRadius.circular(28),
-                boxShadow: [
-                  BoxShadow(
-                    color: primary.withValues(alpha: 0.12),
-                    blurRadius: 30,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: const BoxDecoration(
-                      color: cardColor, // CHANGED: cream instead of grey
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      iconMap[fieldKey] ?? Icons.edit_outlined,
-                      color: Colors.black54,
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Edit $fieldLabel',
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Update your $fieldLabel below',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[500]),
-                  ),
-                  const SizedBox(height: 22),
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    keyboardType: fieldKey == 'phone_number'
-                        ? TextInputType.phone
-                        : TextInputType.text,
-                    decoration: InputDecoration(
-                      prefixIcon: Icon(
-                        iconMap[fieldKey] ?? Icons.edit_outlined,
-                        color: Colors.black45,
-                        size: 20,
-                      ),
-                      hintText: 'Enter $fieldLabel',
-                      filled: true,
-                      fillColor:
-                          cardColor, // CHANGED: cream instead of Color(0xFFFAF7F0)
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: const BorderSide(
-                          color: primary,
-                          width: 1.5,
-                        ),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        vertical: 14,
-                        horizontal: 16,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Color(0xFFDDDDDD)),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: const Text(
-                            'Cancel',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primary,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            elevation: 0,
-                          ),
-                          onPressed: () async {
-                            Navigator.pop(ctx);
-                            final newVal = controller.text.trim();
-
-                            await FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(user!.uid)
-                                .set({
-                                  fieldKey: newVal,
-                                }, SetOptions(merge: true));
-
-                            // ── ADDED: keep FirebaseAuth's displayName in
-                            // sync when the "name" field is edited, so any
-                            // screen reading FirebaseAuth.currentUser
-                            // directly (instead of Firestore) also updates.
-                            if (fieldKey == 'name') {
-                              await user?.updateDisplayName(newVal);
-                              await user?.reload();
-                            }
-
-                            setState(() => _userData[fieldKey] = newVal);
-
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    "$fieldLabel updated successfully",
-                                  ),
-                                  backgroundColor: primary, // Maroon
-                                ),
-                              );
-                            }
-                          },
-                          child: const Text(
-                            'Save',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
+        // StatefulBuilder so the phone field can show a validation error
+        // inline instead of closing the dialog and popping a snackbar.
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            String? phoneError;
+            return Center(
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 28),
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: bgColor, // CHANGED: cream instead of white
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primary.withValues(alpha: 0.12),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
                       ),
                     ],
                   ),
-                ],
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: const BoxDecoration(
+                          color: cardColor, // CHANGED: cream instead of grey
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          iconMap[fieldKey] ?? Icons.edit_outlined,
+                          color: Colors.black54,
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Edit $fieldLabel',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Update your $fieldLabel below',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                      ),
+                      const SizedBox(height: 22),
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        keyboardType: isPhone
+                            ? TextInputType.phone
+                            : TextInputType.text,
+                        maxLength: isPhone ? 10 : null,
+                        inputFormatters: isPhone
+                            ? [FilteringTextInputFormatter.digitsOnly]
+                            : null,
+                        onChanged: isPhone
+                            ? (_) {
+                                if (phoneError != null) {
+                                  setDialogState(() => phoneError = null);
+                                }
+                              }
+                            : null,
+                        decoration: InputDecoration(
+                          prefixIcon: Icon(
+                            iconMap[fieldKey] ?? Icons.edit_outlined,
+                            color: Colors.black45,
+                            size: 20,
+                          ),
+                          prefixText: isPhone ? '+92 ' : null,
+                          prefixStyle: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
+                          hintText: 'Enter $fieldLabel',
+                          counterText: isPhone ? '' : null,
+                          errorText: phoneError,
+                          filled: true,
+                          fillColor:
+                              cardColor, // CHANGED: cream instead of Color(0xFFFAF7F0)
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: const BorderSide(
+                              color: primary,
+                              width: 1.5,
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 16,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFDDDDDD)),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: primary,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                elevation: 0,
+                              ),
+                              onPressed: () async {
+                                final rawInput = controller.text.trim();
+
+                                // Phone must be exactly 10 digits (after
+                                // +92) — same rule checkout enforces.
+                                if (isPhone && rawInput.length != 10) {
+                                  setDialogState(
+                                    () => phoneError =
+                                        'Enter exactly 10 digits',
+                                  );
+                                  return;
+                                }
+
+                                final newVal = isPhone
+                                    ? '+92$rawInput'
+                                    : rawInput;
+
+                                Navigator.pop(ctx);
+
+                                await FirebaseFirestore.instance
+                                    .collection('users')
+                                    .doc(user!.uid)
+                                    .set({
+                                      fieldKey: newVal,
+                                    }, SetOptions(merge: true));
+
+                                // ── ADDED: keep FirebaseAuth's displayName in
+                                // sync when the "name" field is edited, so any
+                                // screen reading FirebaseAuth.currentUser
+                                // directly (instead of Firestore) also updates.
+                                if (fieldKey == 'name') {
+                                  await user?.updateDisplayName(newVal);
+                                  await user?.reload();
+                                }
+
+                                setState(() => _userData[fieldKey] = newVal);
+
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        "$fieldLabel updated successfully",
+                                      ),
+                                      backgroundColor: primary, // Maroon
+                                    ),
+                                  );
+                                }
+                              },
+                              child: const Text(
+                                'Save',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );

@@ -37,6 +37,15 @@ class OrderDetailsScreen extends StatelessWidget {
   static const Color cardColor = Color(0xFFFFFDFA); // Near-white cards
   static const Color lightMaroon = Color(0x33A70000); // ~20% maroon border
 
+  // Success/error message card colors — same palette used on the
+  // Login/Signup screens, kept consistent app-wide.
+  static const Color successBorder = Color(0xFF4A7C59);
+  static const Color successBg = Color(0xFFEAF3ED);
+  static const Color successText = Color(0xFF2F5B3E);
+  static const Color errorBorder = Color(0xFFC62828);
+  static const Color errorBg = Color(0xFFFDECEA);
+  static const Color errorText = Color(0xFFB71C1C);
+
   // Delivery screen sets deliveryTime to "Standard Delivery" for
   // immediate orders, and a formatted date/time string for scheduled
   // ("Deliver Later") orders — so this is not "Standard Delivery" only
@@ -69,6 +78,47 @@ class OrderDetailsScreen extends StatelessWidget {
         builder: (context) => const MainScreen(),
       ), // 👈 CHANGED: HomeScreen -> MainScreen, taake bottom nav bar wapas aaye
       (Route<dynamic> route) => false,
+    );
+  }
+
+  // Same compact, single-line, colored-card snackbar style used on the
+  // Login/Signup screens — green for success, red for error.
+  void _showThemedSnack(
+    BuildContext context,
+    String msg, {
+    bool isError = true,
+  }) {
+    final borderColor = isError ? errorBorder : successBorder;
+    final fillColor = isError ? errorBg : successBg;
+    final textColor = isError ? errorText : successText;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Text(
+            msg,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -124,19 +174,9 @@ class OrderDetailsScreen extends StatelessWidget {
                   _buildStatusBanner(),
                   const SizedBox(height: 8),
 
-                  // ── Items ──
-                  ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: cartItems.length,
-                    itemBuilder: (context, index) {
-                      final item = cartItems[index];
-                      return _buildItemCard(item);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-
-                  // ── Customer / Delivery Details Card ──
+                  // ── Customer / Delivery Details Card (now also holds
+                  // the ordered items below the detail rows, in the same
+                  // card) ──
                   _buildDeliveryDetailsCard(),
                 ],
               ),
@@ -203,7 +243,7 @@ class OrderDetailsScreen extends StatelessWidget {
                   const SizedBox(height: 2),
                   const Text(
                     "Order will be confirmed once you upload the receipt "
-                    "two hours before delivery.",
+                    "1.5 hours before delivery.",
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ],
@@ -238,6 +278,33 @@ class OrderDetailsScreen extends StatelessWidget {
           _detailRow(Icons.schedule_rounded, "Delivery Time", deliveryTime),
           const SizedBox(height: 10),
           _detailRow(Icons.payment_rounded, "Payment Method", paymentMethod),
+
+          // ── Items — shown inside this same card, right below the
+          // delivery details, with no image and tight spacing so the
+          // card doesn't balloon in height. ──
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 10),
+            child: Divider(height: 1),
+          ),
+          const Text(
+            "Items",
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          ...List.generate(cartItems.length, (index) {
+            final item = cartItems[index];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (index > 0) const Divider(height: 12, thickness: 0.5),
+                _buildItemRow(item),
+              ],
+            );
+          }),
         ],
       ),
     );
@@ -284,82 +351,42 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  // ── Item card uses the SAME cardColor as the details card above ──
-  Widget _buildItemCard(CartItem item) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.15)),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
-        ],
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: item.imageUrl.isNotEmpty
-                ? Image.network(
-                    item.imageUrl,
-                    width: 70,
-                    height: 70,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      width: 70,
-                      height: 70,
-                      color: lightMaroon,
-                      child: const Icon(
-                        Icons.fastfood_rounded,
-                        color: themeColor,
-                      ),
-                    ),
-                  )
-                : Container(
-                    width: 70,
-                    height: 70,
-                    color: lightMaroon,
-                    child: const Icon(
-                      Icons.fastfood_rounded,
-                      color: themeColor,
-                    ),
-                  ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.name,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    color: Colors.black87,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+  // ── Compact item row: no image, just name/price/qty — used inside
+  // the details card above instead of its own bordered card. ──
+  Widget _buildItemRow(CartItem item) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.name,
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: Colors.black87,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  "Rs. ${item.price.toStringAsFixed(0)} x ${item.quantity}",
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 1),
+              Text(
+                "Rs. ${item.price.toStringAsFixed(0)} x ${item.quantity}",
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
           ),
-          Text(
-            "Rs. ${(item.price * item.quantity).toStringAsFixed(0)}",
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              color: themeColor,
-              fontSize: 14,
-            ),
+        ),
+        Text(
+          "Rs. ${(item.price * item.quantity).toStringAsFixed(0)}",
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: themeColor,
+            fontSize: 13,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -396,29 +423,24 @@ class OrderDetailsScreen extends StatelessWidget {
         {'orderStatus': 'Cancelled'},
       );
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("Order cancelled.")));
+        _showThemedSnack(context, "Order cancelled.", isError: false);
         goBackToMenu(context);
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Failed to cancel order: $e")));
+        _showThemedSnack(context, "Failed to cancel order: $e");
       }
     }
   }
 
-  // ── Bottom Total + Button Bar (Cancel Order moved to the AppBar menu;
-  // Track Order lives on the My Orders detail screen, not here) ──
+  
   Widget _buildBottomBar(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: lightMaroon),
         boxShadow: const [
           BoxShadow(
@@ -438,28 +460,28 @@ class OrderDetailsScreen extends StatelessWidget {
               children: [
                 const Text(
                   "Subtotal",
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
                 ),
                 Text(
                   "Rs. ${_itemsSubtotal.toStringAsFixed(0)}",
-                  style: const TextStyle(fontSize: 14, color: Colors.black87),
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
                   "Delivery Fee",
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
                 ),
                 Text(
                   _deliveryFee == 0
                       ? "FREE"
                       : "Rs. ${_deliveryFee.toStringAsFixed(0)}",
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: _deliveryFee == 0 ? Colors.green : Colors.black87,
                   ),
@@ -467,7 +489,7 @@ class OrderDetailsScreen extends StatelessWidget {
               ],
             ),
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10),
+              padding: EdgeInsets.symmetric(vertical: 6),
               child: Divider(height: 1),
             ),
             Row(
@@ -476,7 +498,7 @@ class OrderDetailsScreen extends StatelessWidget {
                 const Text(
                   "Total",
                   style: TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.w500,
                     color: Colors.black87,
                   ),
@@ -484,23 +506,23 @@ class OrderDetailsScreen extends StatelessWidget {
                 Text(
                   "Rs. ${totalAmount.toStringAsFixed(0)}",
                   style: const TextStyle(
-                    fontSize: 19,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold,
                     color: themeColor,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
-              height: 46,
+              height: 40,
               child: ElevatedButton(
                 onPressed: () => goBackToMenu(context),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: themeColor,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   elevation: 0,
                 ),
@@ -508,7 +530,7 @@ class OrderDetailsScreen extends StatelessWidget {
                   "Back to Menu",
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 15,
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
