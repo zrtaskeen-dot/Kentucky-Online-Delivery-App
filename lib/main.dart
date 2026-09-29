@@ -13,7 +13,6 @@ import 'rider/rider_logic.dart';
 import 'live_tracking.dart';
 import 'order_history.dart';
 
-
 // Global Key for programmatic navigation upon notification tap
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
@@ -62,7 +61,9 @@ class _MyAppState extends State<MyApp> {
 
   void _setupNotificationNavigation() {
     // 1. Handle app launch from Terminated State when notification is tapped
-    FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+    FirebaseMessaging.instance.getInitialMessage().then((
+      RemoteMessage? message,
+    ) {
       if (message != null) {
         _handleDeepLink(message.data);
       }
@@ -80,9 +81,7 @@ class _MyAppState extends State<MyApp> {
 
     if (screen == 'live_tracking' && orderId != null) {
       navigatorKey.currentState?.push(
-        MaterialPageRoute(
-          builder: (_) => LiveTrackingScreen(orderId: orderId),
-        ),
+        MaterialPageRoute(builder: (_) => LiveTrackingScreen(orderId: orderId)),
       );
     } else if (screen == 'assigned_orders' && orderId != null) {
       // Navigate Rider to Assigned Orders Screen
@@ -93,9 +92,7 @@ class _MyAppState extends State<MyApp> {
       // );
     } else if (screen == 'order_history') {
       navigatorKey.currentState?.push(
-        MaterialPageRoute(
-          builder: (_) => const OrderHistoryScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
       );
     } else if (data['type'] == 'new_menu_item') {
       // Naya deal/item/combo notification tap hone par uski detail
@@ -122,9 +119,13 @@ class _MyAppState extends State<MyApp> {
       child: MaterialApp(
         navigatorKey: navigatorKey, // Attached global key for navigation
         debugShowCheckedModeBanner: false,
-        home: const GlobalFeedbackListener(
-          child: SplashScreen(),
-        ),
+       
+        builder: (context, child) {
+          return GlobalFeedbackListener(
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
+        home: const SplashScreen(),
       ),
     );
   }

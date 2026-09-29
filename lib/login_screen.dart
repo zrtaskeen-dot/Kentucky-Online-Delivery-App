@@ -44,19 +44,11 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color errorBg = Color(0xFFFDECEA);
   static const Color errorText = Color(0xFFB71C1C);
 
-  // Maps a role keyword to its doc id in the 'user_role' collection.
-  // Keep this in sync with signup_screen.dart's roleMap — 'users'
-  // documents store only the roleID (e.g. 'R001'), never the role
-  // text itself.
   static const Map<String, String> roleMap = {
     'customer': 'R001',
     'rider': 'R002',
-    'admin': 'R003',
   };
 
-  // Looks up the human-readable role name from 'user_role' (doc id ==
-  // roleID) whenever the actual text is needed — e.g. for display or
-  // logging. Falls back to an empty string if the lookup fails.
   Future<String> _fetchRoleName(String roleID) async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -113,9 +105,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // ────────────────────────────────────────────────────────────
-  // 👈 ADDED: small helper to write to both log collections at once
-  // ────────────────────────────────────────────────────────────
   Future<void> _logActivity({
     required String action,
     required String performedBy,
@@ -227,17 +216,6 @@ class _LoginScreenState extends State<LoginScreen> {
       }
 
       if (widget.role == 'rider') {
-        // Looking the account up by the signed-in user's own uid (instead
-        // of a Firestore query on the 'email' + 'roleID' fields) fixes
-        // two real ways a rider whose account genuinely exists could get
-        // "Rider account not found": (1) the stored 'email' field having
-        // different casing than what they just typed — Firebase Auth
-        // itself is case-insensitive so sign-in succeeds, but an exact
-        // Firestore string match on 'email' then silently misses; and
-        // (2) riders created through an older admin flow that only ever
-        // set a legacy 'role' text field, never the newer 'roleID' this
-        // query required. Fetching by uid can't miss on casing, and we
-        // check both the current 'roleID' and that legacy 'role' field.
         DocumentSnapshot<Map<String, dynamic>> riderDoc;
         try {
           riderDoc = await FirebaseFirestore.instance
@@ -251,9 +229,13 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         final riderData = riderDoc.data();
-        final roleID = (riderData?['roleID'] ?? '').toString();
-        final legacyRole = (riderData?['role'] ?? '').toString().toLowerCase();
-        final isRider = roleID == roleMap['rider'] || legacyRole == 'rider';
+        // ✅ FIXED: Firestore mein field ka asal naam "roleId" hai (chhota d),
+        // "roleID" nahi. Pehle yeh galat naam parhne ki wajah se hamesha khaali
+        // string milta tha, aur login sirf legacy "role" text field ki wajah se
+        // chal raha tha — ID ki wajah se nahi. Ab sirf roleId (ID-based) check
+        // hota hai, jo user_role collection mein "R002" = rider maps karta hai.
+        final roleId = (riderData?['roleId'] ?? '').toString();
+        final isRider = roleId == roleMap['rider'];
 
         if (riderData == null || !isRider) {
           await FirebaseAuth.instance.signOut();
@@ -264,7 +246,9 @@ class _LoginScreenState extends State<LoginScreen> {
         final riderId = riderDoc.id;
         final riderName = (riderData['name'] ?? riderData['fullName'] ?? email)
             .toString();
-        final branchName = (riderData['branch'] ?? '').toString();
+        // ✅ FIXED: manager panel "branchName" field save karta hai,
+        // "branch" nahi — isliye pehle yeh hamesha khaali aata tha.
+        final branchName = (riderData['branchName'] ?? '').toString();
 
         // 👈 ADDED: block-check — admin ne is rider ko block kiya ho to
         // login yahin rok dein.
@@ -415,10 +399,10 @@ class _LoginScreenState extends State<LoginScreen> {
           await userDoc.set({
             'name': user.displayName ?? '',
             'email': user.email ?? '',
-            // roleID is the source of truth — look up the display
-            // name from 'user_role' (doc id == roleID) via
+            // roleId is the source of truth — look up the display
+            // name from 'user_role' (doc id == roleId) via
             // _fetchRoleName whenever the role text itself is needed.
-            'roleID': roleMap['customer'],
+            'roleId': roleMap['customer'],
             'createdAt': FieldValue.serverTimestamp(),
             'emailVerified': true,
           });

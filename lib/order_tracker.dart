@@ -67,27 +67,7 @@ class _CustomerOrderTrackerScreenState
                 currentUserId != null && currentUserId == orderCustomerId;
 
             // 🔍 Console Debug Logs
-            debugPrint('--- TRACKER DEBUG LOG ---');
-            debugPrint('Current Auth UID: $currentUserId');
-            debugPrint('Firestore Customer ID: $orderCustomerId');
-            debugPrint('Is My Order Match?: $isMyOrder');
-            debugPrint('Order Status: $status');
-            debugPrint('Is Feedback Submitted?: $isFeedbackSubmitted');
-            debugPrint('--------------------------');
-
-            if (status == 'delivered' &&
-                !isFeedbackSubmitted &&
-                !_isDialogShown &&
-                isMyOrder) {
-              _isDialogShown = true;
-
-              // PostFrameCallback ensures the UI frame is fully built before launching the dialog
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) {
-                  _showOrderFeedbackDialog(context, widget.orderId);
-                }
-              });
-            }
+          
           }
         });
   }

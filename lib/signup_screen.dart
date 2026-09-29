@@ -339,10 +339,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await userDoc.set({
         'name': user.displayName ?? '',
         'email': user.email ?? '',
-        // 'role' text field removed — roleID (below) is the source of
-        // truth now; look up the display name from the 'user_role'
-        // collection (doc id == roleID) when the role name is needed.
-        'roleID': roleMap[widget.role],
+        // ✅ FIXED: Firestore mein field ka asal naam "roleId" hai
+        // (chhota d), "roleID" nahi — pehle yeh galat naam likha ja
+        // raha tha, isliye login screen (jo roleId check karta hai)
+        // is user ko rider/customer tasleem nahi karta tha.
+        'roleId': roleMap[widget.role],
         'createdAt': FieldValue.serverTimestamp(),
         // Google already verifies the email address, so there's no
         // separate email-verification step to wait on like there is

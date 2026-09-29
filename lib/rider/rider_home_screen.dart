@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -71,25 +72,48 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   // flip availability without needing the widget tree / BuildContext.
   late final RiderController _riderController = RiderController();
 
+  // Heartbeat: while the app is in the foreground we stamp `lastSeen`
+  // every 1s. If the app is killed / offline the stamps simply stop,
+  // and the manager treats the rider as offline once lastSeen is stale
+  // (RiderController.isRiderOnline) — this works even when the
+  // "isAvailable: false" write on close never manages to go out.
+  Timer? _heartbeatTimer;
+  static const Duration _heartbeatEvery = Duration(seconds: 1);
+
+  void _goOnline() {
+    _riderController.toggleAvailability(widget.riderId, true);
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(_heartbeatEvery, (_) {
+      _riderController.sendHeartbeat(widget.riderId);
+    });
+  }
+
+  void _goOffline() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _riderController.toggleAvailability(widget.riderId, false);
+  }
+
   @override
   void initState() {
     super.initState();
     NotificationService().saveRiderTokenToDatabase(widget.riderId);
     WidgetsBinding.instance.addObserver(this);
     // App just opened in foreground -> rider is available automatically.
-    _riderController.toggleAvailability(widget.riderId, true);
+    _goOnline();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // No manual toggle anymore — availability follows the app's own state.
     if (state == AppLifecycleState.resumed) {
-      // Back in foreground -> available again.
-      _riderController.toggleAvailability(widget.riderId, true);
+      // Back in foreground -> available again, heartbeat restarts.
+      _goOnline();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      // Backgrounded or closed -> unavailable, manager stops seeing rider.
-      _riderController.toggleAvailability(widget.riderId, false);
+      // Backgrounded or closed -> heartbeat stops and rider is marked
+      // unavailable (best-effort; the stale lastSeen is the safety net).
+      _goOffline();
     }
   }
 
@@ -98,7 +122,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     WidgetsBinding.instance.removeObserver(this);
     // Best-effort: also mark unavailable if this screen is torn down
     // directly (e.g. logout) without an app-lifecycle event firing.
-    _riderController.toggleAvailability(widget.riderId, false);
+    _goOffline();
     super.dispose();
   }
 
@@ -1491,7 +1515,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
               return Container(
                 padding: const EdgeInsets.all(24),
                 decoration: const BoxDecoration(
-                  color: Color(0xFFFFFDF0),
+                  color: bgColor,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
                 ),
                 child: SingleChildScrollView(

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 // Update this import path to match where you keep the tracker file.
 import 'order_tracker.dart' show OrderFeedbackDialog;
 import 'notification_service.dart';
+import 'main.dart' show navigatorKey;
 
 // Parses delivery_type.dart's "6 Sep 2026 at 05:30 PM" schedule label
 // back into a DateTime — same format/parsing rules as
@@ -202,7 +203,16 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
   }
 
   Future<void> _tryShowNextDialog() async {
-    if (_isDialogShowing || _pendingOrderIds.isEmpty || !mounted) return;
+    if (_isDialogShowing || _pendingOrderIds.isEmpty) return;
+
+    // This widget now lives ABOVE the app's Navigator (mounted via
+    // MaterialApp's `builder`, see main.dart), so its own `context`
+    // doesn't have a Navigator ancestor to show a dialog on — using the
+    // app-wide navigatorKey instead reaches the Navigator directly,
+    // works no matter which screen is currently on top, and doesn't
+    // depend on this widget's own BuildContext at all.
+    final dialogContext = navigatorKey.currentContext;
+    if (dialogContext == null) return;
 
     _isDialogShowing = true;
     final orderId = _pendingOrderIds.removeAt(0);
@@ -212,7 +222,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
     );
 
     await showDialog(
-      context: context,
+      context: dialogContext,
       barrierDismissible: false,
       builder: (_) => OrderFeedbackDialog(orderId: orderId),
     );

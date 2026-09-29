@@ -96,6 +96,8 @@ class RiderController extends ChangeNotifier {
     try {
       await FirebaseFirestore.instance.collection('users').doc(riderId).update({
         'isAvailable': newStatus,
+        // Every availability change also counts as a check-in.
+        'lastSeen': FieldValue.serverTimestamp(),
       });
       debugPrint('Rider availability updated to: $newStatus');
     } catch (e) {
@@ -103,6 +105,36 @@ class RiderController extends ChangeNotifier {
     } finally {
       _setLoading(false);
     }
+  }
+
+  // 3b. Heartbeat — called every ~1s while the app is in the foreground — WARNING: this writes to Firestore once per second per online rider, which is costly at scale and close to Firestore's recommended per-document write rate limit.
+  // A closed/killed app can't reliably write "isAvailable: false" (the
+  // OS may kill it before the write goes out, or the phone may be
+  // offline), so the manager side must NOT trust isAvailable alone.
+  // It should also check that `lastSeen` is recent — see isRiderOnline().
+  // Deliberately does not touch _isLoading so the UI doesn't rebuild.
+  Future<void> sendHeartbeat(String riderId) async {
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(riderId).update({
+        'isAvailable': true,
+        'lastSeen': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      debugPrint('Heartbeat failed: $e');
+    }
+  }
+
+  // Use this everywhere the manager lists or assigns riders. A rider is
+  // online only if they flagged themselves available AND their app has
+  // checked in within [maxAge] (a couple missed 1s heartbeats by default).
+  static bool isRiderOnline(
+    Map<String, dynamic> data, {
+    Duration maxAge = const Duration(milliseconds: 2500),
+  }) {
+    if (data['isAvailable'] != true) return false;
+    final seen = data['lastSeen'];
+    if (seen is! Timestamp) return false;
+    return DateTime.now().difference(seen.toDate()) <= maxAge;
   }
 
   // 4. Accept Order Method
