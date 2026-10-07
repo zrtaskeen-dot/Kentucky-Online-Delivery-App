@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -16,6 +17,164 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
+
+  // Live popup: watches the same 'notifications' query as the badge and
+  // pops a top banner for any notification that arrives WHILE the app is
+  // open (the first snapshot — notifications that already existed when
+  // the screen loaded — is skipped so old unread items don't all pop up
+  // at once on launch).
+  StreamSubscription<QuerySnapshot>? _notifSub;
+  bool _skippedInitialNotifSnapshot = false;
+  OverlayEntry? _bannerEntry;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _listenForNewNotifications(),
+    );
+  }
+
+  void _listenForNewNotifications() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _notifSub = FirebaseFirestore.instance
+        .collection('notifications')
+        .where('userId', whereIn: [uid, 'ALL'])
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen((snap) {
+          if (!_skippedInitialNotifSnapshot) {
+            // Don't pop a banner for whatever was already the latest
+            // notification when this screen first mounted.
+            _skippedInitialNotifSnapshot = true;
+            return;
+          }
+          if (snap.docChanges.isEmpty) return;
+
+          for (final change in snap.docChanges) {
+            if (change.type != DocumentChangeType.added) continue;
+            final data = change.doc.data() as Map<String, dynamic>? ?? {};
+            final hiddenFor = List<String>.from(data['hiddenFor'] ?? const []);
+            if (hiddenFor.contains(uid)) continue;
+            _showNotificationBanner(
+              title: (data['title'] ?? 'New notification').toString(),
+              body: (data['body'] ?? '').toString(),
+            );
+          }
+        });
+  }
+
+  void _showNotificationBanner({required String title, required String body}) {
+    if (!mounted) return;
+    _bannerEntry?.remove();
+
+    final overlay = Overlay.of(context);
+    final entry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).padding.top + 8,
+        left: 12,
+        right: 12,
+        child: Material(
+          color: Colors.transparent,
+          child: SafeArea(
+            bottom: false,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                _bannerEntry?.remove();
+                _bannerEntry = null;
+                setState(() => _currentIndex = 2); // jump to Notifications tab
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: _maroon,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: _orange,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.notifications,
+                        color: Colors.white,
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          if (body.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              body,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: _cream.withValues(alpha: 0.9),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    _bannerEntry = entry;
+    overlay.insert(entry);
+
+    Future.delayed(const Duration(seconds: 4), () {
+      if (_bannerEntry == entry) {
+        entry.remove();
+        _bannerEntry = null;
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _notifSub?.cancel();
+    _bannerEntry?.remove();
+    super.dispose();
+  }
 
   // 👈 Unified brand palette: maroon + orange + white/cream
   static const Color _maroon = Color(0xFFA70000);
@@ -65,6 +224,7 @@ class _MainScreenState extends State<MainScreen> {
   Widget _notificationIconWithBadge({
     required bool selected,
     required String? currentUserId,
+    required DateTime? accountCreatedAt,
   }) {
     return StreamBuilder<QuerySnapshot>(
       stream: currentUserId == null
@@ -79,18 +239,25 @@ class _MainScreenState extends State<MainScreen> {
         int unreadCount = 0;
 
         if (snapshot.hasData) {
-          // The query above only filters by userId + isRead — it doesn't
-          // know about per-user "deleted" notifications. Deleting a
-          // notification just adds the uid to that doc's `hiddenFor`
-          // array (see NotificationService.hideNotificationForUser), so
-          // without this filter, a deleted-but-unread notification kept
-          // counting toward the badge even after it disappeared from the
-          // list — matching the same client-side filter NotificationScreen
-          // uses.
+          // Mirrors NotificationScreen's filtering exactly, so the badge
+          // number always matches what actually shows up in the list:
+          // - hiddenFor: skip anything this user "deleted" from their list.
+          // - 'ALL' broadcasts sent before this account existed never show
+          //   in the list either — without this check they still counted
+          //   toward the badge, which is why a "1" could sit there with no
+          //   unread notification actually visible to the user.
           unreadCount = snapshot.data!.docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>? ?? {};
             final hiddenFor = List<String>.from(data['hiddenFor'] ?? const []);
-            return !hiddenFor.contains(currentUserId);
+            if (hiddenFor.contains(currentUserId)) return false;
+
+            if (data['userId'] == 'ALL' && accountCreatedAt != null) {
+              final ts = data['timestamp'];
+              if (ts is Timestamp && ts.toDate().isBefore(accountCreatedAt)) {
+                return false;
+              }
+            }
+            return true;
           }).length;
         }
 
@@ -136,6 +303,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
+    final accountCreatedAt = currentUser?.metadata.creationTime;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFFDF2),
@@ -205,10 +373,12 @@ class _MainScreenState extends State<MainScreen> {
                   icon: _notificationIconWithBadge(
                     selected: false,
                     currentUserId: currentUser?.uid,
+                    accountCreatedAt: accountCreatedAt,
                   ),
                   activeIcon: _notificationIconWithBadge(
                     selected: true,
                     currentUserId: currentUser?.uid,
+                    accountCreatedAt: accountCreatedAt,
                   ),
                   label: 'Alerts',
                 ),

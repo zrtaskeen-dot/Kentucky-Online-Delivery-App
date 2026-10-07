@@ -5,7 +5,13 @@ import 'package:flutter/material.dart';
 // Update this import path to match where you keep the tracker file.
 import 'order_tracker.dart' show OrderFeedbackDialog;
 import 'notification_service.dart';
-import 'main.dart' show navigatorKey;
+import 'main.dart'show navigatorKey;
+
+// AuthWrapper sets this to true the moment the customer's home screen is
+// actually on screen (i.e. splash / onboarding / login are finished), and
+// back to false when it goes away. The feedback popup waits for this signal
+// instead of guessing how long the splash screen takes.
+final ValueNotifier<bool> customerHomeReady = ValueNotifier<bool>(false);
 
 // Parses delivery_type.dart's "6 Sep 2026 at 05:30 PM" schedule label
 // back into a DateTime — same format/parsing rules as
@@ -115,6 +121,19 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
   final List<String> _pendingOrderIds = [];
   bool _isDialogShowing = false;
 
+  // Popups are held back until the customer's home screen is really on
+  // screen (customerHomeReady, set by AuthWrapper). Showing a dialog while
+  // the splash is still playing was the bug: the splash then navigated away
+  // and took the dialog with it before the customer could type anything.
+  // Queued orders are simply held until ready; nothing is lost.
+  bool _homeReady = false;
+
+  // Safety net: if the home screen is reached some way that never signals
+  // (so customerHomeReady stays false), allow popups after this long anyway.
+  bool _fallbackElapsed = false;
+
+  bool get _readyToShowDialogs => _homeReady || _fallbackElapsed;
+
   // ── Payment reminders ──
   StreamSubscription<QuerySnapshot>? _paymentReminderSubscription;
   Timer? _paymentReminderTicker;
@@ -128,10 +147,33 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
     _authSubscription = FirebaseAuth.instance.authStateChanges().listen(
       _onAuthChanged,
     );
+
+    customerHomeReady.addListener(_onHomeReadyChanged);
+    if (customerHomeReady.value) _onHomeReadyChanged();
+
+    Future.delayed(const Duration(seconds: 12), () {
+      if (!mounted) return;
+      _fallbackElapsed = true;
+      _tryShowNextDialog();
+    });
+  }
+
+  void _onHomeReadyChanged() {
+    if (!customerHomeReady.value) {
+      _homeReady = false;
+      return;
+    }
+    // Let the screen transition finish before a dialog pops up over it.
+    Future.delayed(const Duration(milliseconds: 800), () {
+      if (!mounted || !customerHomeReady.value) return;
+      _homeReady = true;
+      _tryShowNextDialog();
+    });
   }
 
   @override
   void dispose() {
+    customerHomeReady.removeListener(_onHomeReadyChanged);
     _authSubscription?.cancel();
     _stopListening();
     super.dispose();
@@ -173,9 +215,9 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
           .get();
       final data = doc.data();
       if (data == null) return false; // e.g. guest — treat as customer
-      final roleID = (data['roleID'] ?? '').toString();
+      final roleId = (data['roleId'] ?? '').toString();
       final legacyRole = (data['role'] ?? '').toString().toLowerCase();
-      return roleID == 'R002' || legacyRole == 'rider';
+      return roleId == 'R002' || legacyRole == 'rider';
     } catch (e) {
       debugPrint('GlobalFeedbackListener: role check failed: $e');
       return false;
@@ -203,7 +245,9 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
   }
 
   Future<void> _tryShowNextDialog() async {
-    if (_isDialogShowing || _pendingOrderIds.isEmpty) return;
+    if (!_readyToShowDialogs || _isDialogShowing || _pendingOrderIds.isEmpty) {
+      return;
+    }
 
     // This widget now lives ABOVE the app's Navigator (mounted via
     // MaterialApp's `builder`, see main.dart), so its own `context`

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'models/food_item.dart';
@@ -99,10 +100,74 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _qtyFocus.addListener(_onQtyFocusChange);
     if (pricesMap.isNotEmpty) {
       selectedSize = sortedSizeKeys.first;
     }
     _fetchToppings();
+  }
+
+  // ── Quantity limits ──────────────────────────────────────────────
+  // "+" button yahan tak jata hai. Isse zyada ke liye customer number par
+  // tap karke khud type kar sakta hai (maxLength 5 => 99,999 tak).
+  static const int _stepperMaxQty = 500;
+  static const int _manualMaxQty = 99999;
+
+  final TextEditingController _qtyController = TextEditingController(text: '1');
+  final FocusNode _qtyFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _qtyFocus.removeListener(_onQtyFocusChange);
+    _qtyFocus.dispose();
+    _qtyController.dispose();
+    super.dispose();
+  }
+
+  void _onQtyFocusChange() {
+    // Field se bahar jate hi typed value ko theek (normalize) kar do.
+    if (!_qtyFocus.hasFocus) _commitQtyText();
+  }
+
+  // Quantity ko 1.._manualMaxQty mein rakhta hai aur text field ko sync karta hai.
+  void _setQuantity(int value) {
+    if (!mounted) return;
+    final int q = value.clamp(1, _manualMaxQty).toInt();
+    setState(() => quantity = q);
+    final String text = q.toString();
+    if (_qtyController.text != text) {
+      _qtyController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    }
+  }
+
+  // Typing ke dauran: valid number ho to total foran update hota hai.
+  // Khali ya 0 ho to last valid quantity rehti hai (field abhi edit ho raha hai).
+  void _onQtyTyped(String raw) {
+    final int? parsed = int.tryParse(raw);
+    if (parsed != null && parsed >= 1) {
+      setState(() => quantity = parsed);
+    }
+  }
+
+  // Edit khatam: khali/0 ho to last valid quantity wapas, warna "007" -> "7".
+  void _commitQtyText() {
+    final int? parsed = int.tryParse(_qtyController.text);
+    _setQuantity((parsed == null || parsed < 1) ? quantity : parsed);
+  }
+
+  void _incrementQty() {
+    if (quantity >= _stepperMaxQty) return; // zyada ke liye number par tap karo
+    FocusScope.of(context).unfocus();
+    _setQuantity(quantity + 1);
+  }
+
+  void _decrementQty() {
+    if (quantity <= 1) return;
+    FocusScope.of(context).unfocus();
+    _setQuantity(quantity - 1);
   }
 
   Future<void> _fetchToppings() async {
@@ -128,6 +193,9 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   }
 
   Future<void> _addToCart() async {
+    // Keyboard band karo aur typed quantity final kar do.
+    FocusScope.of(context).unfocus();
+    _commitQtyText();
     setState(() => isAddingToCart = true);
     try {
       final int price = unitPrice;
@@ -205,6 +273,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
       body: Stack(
         children: [
           SingleChildScrollView(
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             padding: const EdgeInsets.only(bottom: 100),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -647,38 +716,78 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   }
 
   Widget _buildQuantityRectBox() {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    final bool atStepperMax = quantity >= _stepperMaxQty;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _qtyRectButton("-", () {
-          if (quantity > 1) setState(() => quantity--);
-        }),
-        Container(
-          width: 44,
-          height: 38,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            border: Border.symmetric(
-              horizontal: BorderSide(color: Colors.grey.shade300),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _qtyRectButton("-", _decrementQty, enabled: quantity > 1),
+            Container(
+              width: 72,
+              height: 38,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border.symmetric(
+                  horizontal: BorderSide(color: Colors.grey.shade300),
+                ),
+              ),
+              // Tap karke seedha type kar sakte hain.
+              child: TextField(
+                controller: _qtyController,
+                focusNode: _qtyFocus,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                textAlign: TextAlign.center,
+                maxLength: 5,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                cursorColor: themeColor,
+                onTap: () => _qtyController.selection = TextSelection(
+                  baseOffset: 0,
+                  extentOffset: _qtyController.text.length,
+                ),
+                onChanged: _onQtyTyped,
+                onSubmitted: (_) => _commitQtyText(),
+                onTapOutside: (_) => _qtyFocus.unfocus(),
+                style: const TextStyle(
+                  color: Colors.black,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+                decoration: const InputDecoration(
+                  counterText: '',
+                  border: InputBorder.none,
+                  isCollapsed: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
             ),
-          ),
-          child: Text(
-            "$quantity",
-            style: const TextStyle(
-              color: Colors.black,
-              fontWeight: FontWeight.w600,
-              fontSize: 16,
-            ),
+            _qtyRectButton("+", _incrementQty, enabled: !atStepperMax),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Text(
+          atStepperMax
+              ? 'Maximum $_stepperMaxQty with + . Tap the number to type a larger quantity.'
+              : 'Tap the number to type a custom quantity.',
+          style: TextStyle(
+            fontSize: 11.5,
+            color: atStepperMax ? themeColor : Colors.grey[600],
+            fontWeight: atStepperMax ? FontWeight.w600 : FontWeight.w500,
           ),
         ),
-        _qtyRectButton("+", () => setState(() => quantity++)),
       ],
     );
   }
 
-  Widget _qtyRectButton(String label, VoidCallback onTap) {
+  Widget _qtyRectButton(
+    String label,
+    VoidCallback onTap, {
+    bool enabled = true,
+  }) {
     return InkWell(
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
       child: Container(
         width: 38,
         height: 38,
@@ -688,8 +797,8 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         ),
         child: Text(
           label,
-          style: const TextStyle(
-            color: themeColor,
+          style: TextStyle(
+            color: enabled ? themeColor : Colors.grey.shade400,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),

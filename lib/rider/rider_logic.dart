@@ -5,6 +5,23 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../notification_service.dart';
 
+/// A GPS reading reports how accurate it is (radius in meters). Weak readings
+/// (indoors, cell-tower/Wi-Fi based) can be hundreds of meters or even
+/// kilometers off, which is what made the rider appear in a wrong area on the
+/// customer's map. Only readings tighter than [maxAccuracyMeters] are uploaded.
+bool isReliableRiderFix(Position p, {double maxAccuracyMeters = 50}) {
+  if (p.accuracy > 0 && p.accuracy > maxAccuracyMeters) return false;
+  return true;
+}
+
+/// A cached "last known" position can be hours old and far away, so it is only
+/// used if it is recent.
+bool isFreshFix(Position p, {Duration maxAge = const Duration(seconds: 60)}) {
+  final DateTime? ts = p.timestamp;
+  if (ts == null) return false;
+  return DateTime.now().difference(ts) <= maxAge;
+}
+
 class RiderController extends ChangeNotifier {
   bool _isLoading = false;
   bool get isLoading => _isLoading;
@@ -13,6 +30,18 @@ class RiderController extends ChangeNotifier {
   String get error => _error;
 
   StreamSubscription<Position>? _positionStreamSubscription;
+
+  // Orders that are currently "On the Way". ONE GPS stream is shared by all of
+  // them: every new reading is written to every order in this set, so each
+  // customer sees the same live rider location on their own tracking map.
+  final Set<String> _trackedOrderIds = {};
+  Position? _lastPosition;
+  bool _startingStream = false;
+
+  // Latest reliable rider position, for screens that draw the rider (the
+  // rider's delivery map). A ValueNotifier, so GPS updates only rebuild the
+  // widgets that listen to it instead of the whole app.
+  final ValueNotifier<Position?> riderPosition = ValueNotifier<Position?>(null);
 
   // Builds a friendly in-app notification for the customer based on the
   // new order status. For 'Accepted' it looks up the rider's name so the
@@ -36,12 +65,6 @@ class RiderController extends ChangeNotifier {
           riderName = riderDoc.data()?['name'] ?? riderName;
         }
         body = '$riderName has accepted your order and will pick it up soon.';
-        break;
-      case 'Delivery Started':
-        body = 'Your rider has started heading your way.';
-        break;
-      case 'Picked Up':
-        body = 'Your order has been picked up and is on its way.';
         break;
       case 'On the Way':
         body = 'Your rider is on the way to you 🛵';
@@ -85,7 +108,7 @@ class RiderController extends ChangeNotifier {
         .where('riderId', isEqualTo: riderId)
         .where(
           'orderStatus',
-          whereIn: ['Accepted', 'Delivery Started', 'Picked Up', 'On the Way'],
+          whereIn: ['Accepted', 'Picked Up', 'On the Way'],
         )
         .snapshots();
   }
@@ -139,9 +162,7 @@ class RiderController extends ChangeNotifier {
 
   // 4. Accept Order Method
   // No restriction here — a rider can accept as many orders as they want
-  // (they just sit in "Accepted" state). The one-active-delivery rule is
-  // enforced separately in updateOrderStatus() when a rider tries to
-  // actually START a delivery (transition to "Picked Up").
+  // (they just sit in "Accepted" state until the rider taps "On the Way").
   Future<bool> acceptOrder(
     String orderId,
     String riderId,
@@ -184,18 +205,16 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  // 4b. Update Order Status (Picked Up / On the Way / Delivered / etc.)
+  // 4b. Update Order Status (On the Way / Delivered / etc.)
   // Writes the new status to Firestore, then sends the customer an in-app
   // notification (no Cloud Functions / backend server involved — it's
   // just a document written to the `notifications` collection, which
   // NotificationScreen listens to live).
   //
-  // One-active-delivery rule: a rider can have many orders sitting in
-  // "Accepted", but can only be actually OUT delivering one at a time.
-  // So the check happens specifically on the transition into "Picked Up"
-  // — that's the moment a delivery actually "starts". Once an order is
-  // already Picked Up, moving it on to "On the Way" / "Delivered" never
-  // hits this check (it's the same delivery continuing).
+  // There is NO one-delivery-at-a-time rule: a rider can mark as many orders
+  // "On the Way" as they like. Every "On the Way" order gets the rider's live
+  // GPS location (see startLiveLocationTracking below); "Delivered" removes
+  // just that one order from tracking.
   Future<bool> updateOrderStatus(String orderId, String newStatus) async {
     _setLoading(true);
     _setError('');
@@ -207,38 +226,8 @@ class RiderController extends ChangeNotifier {
       // Read first so we know the riderId/customerId before writing.
       final orderSnap = await orderRef.get();
       final orderData = orderSnap.data();
-      final riderId = (orderData?['riderId'] ?? '').toString();
       final customerId =
           (orderData?['customerId'] ?? orderData?['userId'] ?? '').toString();
-
-      // One-active-delivery rule: a rider can have many orders sitting in
-      // "Accepted", but can only be actually OUT delivering one at a
-      // time. "Delivery Started" is the moment a delivery actually
-      // begins (rider tapped "Start Delivery"), so the check happens
-      // right there — not later at "Picked Up". Once a delivery has
-      // started, moving it on to "Picked Up" / "On the Way" / "Delivered"
-      // never hits this check again (it's the same delivery continuing).
-      if (newStatus == 'Delivery Started' && riderId.isNotEmpty) {
-        final activeSnap = await FirebaseFirestore.instance
-            .collection('orders')
-            .where('riderId', isEqualTo: riderId)
-            .where(
-              'orderStatus',
-              whereIn: ['Delivery Started', 'Picked Up', 'On the Way'],
-            )
-            .get();
-        final hasOtherActiveDelivery = activeSnap.docs.any(
-          (d) => d.id != orderId,
-        );
-
-        if (hasOtherActiveDelivery) {
-          _setError(
-            'You already have a delivery in progress. Please complete it before starting another.',
-          );
-          _setLoading(false);
-          return false;
-        }
-      }
 
       await orderRef.update({
         // Only the camelCase field from here on — see the comment in
@@ -258,11 +247,15 @@ class RiderController extends ChangeNotifier {
         status: newStatus,
       ).catchError((e) => debugPrint('Error notifying customer: $e'));
 
-      if (newStatus == 'Picked Up') {
-        // Rider has the food in hand now — begin GPS tracking.
+      if (newStatus == 'On the Way') {
+        // This order is now eligible for live tracking — the rider's GPS
+        // location is written to it (together with any other On the Way
+        // orders) until it is delivered.
         startLiveLocationTracking(orderId);
       } else if (newStatus == 'Delivered') {
-        stopLiveLocationTracking();
+        // Only this order stops being tracked; other On the Way orders keep
+        // receiving the live location.
+        stopTrackingOrder(orderId);
       }
 
       debugPrint('Order $orderId status updated to: $newStatus');
@@ -371,64 +364,203 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  // 6. Live GPS Location Tracking
-  void startLiveLocationTracking(String orderId) async {
-    bool serviceEnabled;
-    LocationPermission permission;
+  // 6. Live GPS Location Tracking (works for many orders at once)
+  //
+  // Marks [orderId] as "On the Way" for tracking purposes. The shared GPS
+  // stream is started if it isn't running yet; if it already is (another
+  // order is On the Way), the latest known position is simply written to the
+  // new order straight away, so its customer sees the rider immediately.
+  Future<void> startLiveLocationTracking(String orderId) async {
+    _trackedOrderIds.add(orderId);
 
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      debugPrint('Location services are disabled.');
+    if (_positionStreamSubscription == null) {
+      await _ensureLocationStream();
+    } else if (_lastPosition != null) {
+      _writeLocationToOrder(orderId, _lastPosition!);
+    }
+  }
+
+  // Stops tracking ONE order (e.g. after it is delivered). The GPS stream
+  // itself only stops when no order is On the Way any more.
+  void stopTrackingOrder(String orderId) {
+    _trackedOrderIds.remove(orderId);
+    if (_trackedOrderIds.isEmpty) {
+      stopLiveLocationTracking();
+    }
+  }
+
+  // Makes the set of tracked orders exactly match the orders that are
+  // currently "On the Way" in Firestore. The rider home screen calls this on
+  // every change, which also RESUMES tracking after the app was closed and
+  // reopened (the in-memory set is lost when the app restarts).
+  void syncOnTheWayOrders(Iterable<String> onTheWayOrderIds) {
+    final wanted = onTheWayOrderIds.toSet();
+    final added = wanted.difference(_trackedOrderIds);
+
+    _trackedOrderIds
+      ..clear()
+      ..addAll(wanted);
+
+    if (wanted.isEmpty) {
+      stopLiveLocationTracking();
       return;
     }
 
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        debugPrint('Location permissions denied.');
-        return;
+    if (_positionStreamSubscription == null) {
+      _ensureLocationStream();
+    } else if (_lastPosition != null) {
+      for (final id in added) {
+        _writeLocationToOrder(id, _lastPosition!);
       }
     }
+  }
 
-    if (permission == LocationPermission.deniedForever) {
-      debugPrint(' Location permissions permanently denied.');
-      return;
+  // Starts the single shared GPS stream (if it isn't already running).
+  Future<void> _ensureLocationStream() async {
+    if (_positionStreamSubscription != null || _startingStream) return;
+    _startingStream = true;
+
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        debugPrint('Location services are disabled.');
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          debugPrint('Location permissions denied.');
+          return;
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        debugPrint('Location permissions permanently denied.');
+        return;
+      }
+
+      // Start the live stream FIRST, so a slow/failed first GPS fix can never
+      // stop tracking from starting.
+      _positionStreamSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: _backgroundLocationSettings(),
+          ).listen(
+            (Position position) {
+              if (!isReliableRiderFix(position)) return; // skip weak GPS
+              _onNewPosition(position);
+            },
+            onError: (e) => debugPrint('Location stream error: $e'),
+          );
+
+      // The stream has a 3 m distanceFilter, so it stays silent until the
+      // rider moves. Take one reading right now (with a time limit and a
+      // fresh-only last-known fallback) so customers see the rider at once.
+      try {
+        Position? firstPosition;
+        try {
+          firstPosition = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 10),
+          );
+        } catch (_) {
+          // Only trust a cached position if it is recent (an old one can be
+          // kilometers away from where the rider really is).
+          final last = await Geolocator.getLastKnownPosition();
+          if (last != null && isFreshFix(last)) firstPosition = last;
+        }
+        if (firstPosition != null &&
+            isReliableRiderFix(firstPosition, maxAccuracyMeters: 100)) {
+          _onNewPosition(firstPosition);
+        }
+      } catch (e) {
+        debugPrint('Error getting first location: $e');
+      }
+    } catch (e) {
+      debugPrint('Error starting live location: $e');
+    } finally {
+      _startingStream = false;
     }
+  }
 
-    _positionStreamSubscription?.cancel();
+  // One new reading -> remember it, publish it to listening screens, and
+  // write it to EVERY order that is currently On the Way.
+  void _onNewPosition(Position position) {
+    _lastPosition = position;
+    riderPosition.value = position;
+    for (final orderId in _trackedOrderIds.toList()) {
+      _writeLocationToOrder(orderId, position);
+    }
+  }
 
-    _positionStreamSubscription =
-        Geolocator.getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 10,
-          ),
-        ).listen((Position position) {
-          FirebaseFirestore.instance
-              .collection('orders')
-              .doc(orderId)
-              .update({
-                'riderLatitude': position.latitude,
-                'riderLongitude': position.longitude,
-                'lastLocationUpdate': FieldValue.serverTimestamp(),
-              })
-              .catchError((e) {
-                debugPrint('Error updating live location: $e');
-              });
+  // Location settings that keep the updates coming even when the rider's
+  // app is in the background - e.g. while the rider is driving with Google
+  // Maps open (launchCustomerNavigation opens Google Maps as a separate app,
+  // which puts this app in the background). Without a foreground service,
+  // Android pauses the app's location updates as soon as that happens, which
+  // is why the customer saw the rider "stuck" after the rider started moving.
+  LocationSettings _backgroundLocationSettings() {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return AndroidSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 3,
+        intervalDuration: const Duration(seconds: 5),
+        foregroundNotificationConfig: const ForegroundNotificationConfig(
+          notificationTitle: 'Delivery in progress',
+          notificationText: 'Sharing your live location with the customer',
+          notificationChannelName: 'Delivery tracking',
+          enableWakeLock: true,
+        ),
+      );
+    }
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 3,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: true,
+      );
+    }
+    return const LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 3,
+    );
+  }
+
+  void _writeLocationToOrder(String orderId, Position position) {
+    FirebaseFirestore.instance
+        .collection('orders')
+        .doc(orderId)
+        .update({
+          'riderLat': position.latitude,
+          'riderLng': position.longitude,
+          // Diagnostics: GPS accuracy in meters, and whether the phone says the
+          // position is fake (mock-location app / emulator).
+          'riderAccuracy': position.accuracy,
+          'riderMocked': position.isMocked,
+          'lastLocationUpdate': FieldValue.serverTimestamp(),
+        })
+        .catchError((e) {
+          debugPrint('Error updating live location for $orderId: $e');
         });
   }
 
-  // 7. Stop Live Location Tracking
+  // 7. Stop ALL live location tracking (no order is On the Way any more, or
+  // the rider logged out).
   void stopLiveLocationTracking() {
     _positionStreamSubscription?.cancel();
     _positionStreamSubscription = null;
+    _trackedOrderIds.clear();
+    _lastPosition = null;
+    riderPosition.value = null;
     debugPrint(' Live location tracking stopped.');
   }
 
   @override
   void dispose() {
     stopLiveLocationTracking();
+    riderPosition.dispose();
     super.dispose();
   }
 }

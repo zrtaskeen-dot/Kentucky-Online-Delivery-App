@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'smart_combo_items_screen.dart';
 import '../cart_screen.dart';
+import '../cart_provider.dart';
 
 class SmartComboCategoriesScreen extends StatefulWidget {
   final String branchId;
@@ -54,8 +56,9 @@ class _SmartComboCategoriesScreenState
                   children: [
                     IconButton(
                       icon: const Icon(
-                        Icons.arrow_back_ios_new,
+                        Icons.arrow_back,
                         color: Colors.white,
+                        size: 24,
                       ),
                       onPressed: () => Navigator.pop(context),
                     ),
@@ -190,7 +193,9 @@ class _SmartComboCategoriesScreenState
                                       height: 160,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: Colors.white.withValues(alpha: 0.15),
+                                        color: Colors.white.withValues(
+                                          alpha: 0.15,
+                                        ),
                                         boxShadow: [
                                           BoxShadow(
                                             color: Colors.black.withValues(
@@ -259,13 +264,45 @@ class _SmartComboCategoriesScreenState
   // shopping cart icon ke upar chhota badge dikhata hai. Tap karne
   // par seedha CartScreen khulti hai.
   Widget _buildCartIconWithBadge(BuildContext context) {
+    // CartScreen wala hi filter: sirf ACTIVE branch ke items gine jayen.
+    final String activeBranchId = context
+        .watch<CartProvider>()
+        .selectedBranchId;
+
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('carts')
           .where('userId', isEqualTo: userId)
           .snapshots(),
       builder: (context, snapshot) {
-        int itemCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
+        // Pehle sab docs gine jate the (dusri branch ke bhi), is liye
+        // cart khali hone par bhi "1" dikhta tha. Ab branchId khali ho ya
+        // active branch ke barabar ho, sirf wohi gine jate hain.
+        int itemCount = 0;
+        if (snapshot.hasData) {
+          final counted = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final docBranchId = (data['branchId'] ?? '').toString();
+            if (!(docBranchId.isEmpty || docBranchId == activeBranchId)) {
+              return false;
+            }
+            // quantity 0 ya kam wale documents ko na ginein
+            final qty = data['quantity'];
+            if (qty is num && qty <= 0) return false;
+            return true;
+          }).toList();
+          itemCount = counted.length;
+
+          // TEMPORARY DEBUG: masla theek hone ke baad ye print hata dein.
+          debugPrint(
+            'CART BADGE | uid=$userId | activeBranch="$activeBranchId" | '
+            'allDocs=${snapshot.data!.docs.length} | counted=$itemCount | '
+            '${counted.map((d) {
+              final m = d.data() as Map<String, dynamic>;
+              return '${d.id}{name=${m['name']}, branchId=${m['branchId']}, qty=${m['quantity']}}';
+            }).toList()}',
+          );
+        }
 
         return Stack(
           clipBehavior: Clip.none,

@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../rider/rider_logic.dart';
 import '../notification_service.dart';
 import 'rider_profile.dart';
+import 'rider_order_track.dart';
 
 // Orders in this app get their status written under two different field
 // names depending on which code path touched them — 'orderStatus'
@@ -80,6 +81,26 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   Timer? _heartbeatTimer;
   static const Duration _heartbeatEvery = Duration(seconds: 1);
 
+  // Watches this rider's "On the Way" orders and keeps live GPS tracking in
+  // sync with them: every On the Way order gets the rider's live location
+  // (even several at once), and tracking resumes by itself if the app was
+  // closed and reopened while orders were still On the Way.
+  StreamSubscription<QuerySnapshot>? _onTheWaySub;
+
+  void _watchOnTheWayOrders() {
+    _onTheWaySub = FirebaseFirestore.instance
+        .collection('orders')
+        .where('riderId', isEqualTo: widget.riderId)
+        .where('orderStatus', isEqualTo: 'On the Way')
+        .snapshots()
+        .listen(
+          (snap) => _riderController.syncOnTheWayOrders(
+            snap.docs.map((d) => d.id),
+          ),
+          onError: (e) => debugPrint('On the Way watcher error: $e'),
+        );
+  }
+
   void _goOnline() {
     _riderController.toggleAvailability(widget.riderId, true);
     _heartbeatTimer?.cancel();
@@ -101,6 +122,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     WidgetsBinding.instance.addObserver(this);
     // App just opened in foreground -> rider is available automatically.
     _goOnline();
+    _watchOnTheWayOrders();
   }
 
   @override
@@ -123,6 +145,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     // Best-effort: also mark unavailable if this screen is torn down
     // directly (e.g. logout) without an app-lifecycle event firing.
     _goOffline();
+    _onTheWaySub?.cancel();
+    _riderController.stopLiveLocationTracking();
     super.dispose();
   }
 
@@ -1132,6 +1156,23 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
             icon: const Icon(Icons.arrow_back, color: Colors.black),
             onPressed: () => setState(() => _currentIndex = 0),
           ),
+          actions: [
+            // Opens the rider's map with every "On the Way" customer pinned
+            // (with their name) and the rider's live location.
+            IconButton(
+              tooltip: 'Delivery map',
+              icon: const Icon(Icons.map_rounded, color: primary),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => RiderDeliveriesMapScreen(
+                    riderId: widget.riderId,
+                    riderController: _riderController,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
         body: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance
@@ -1362,118 +1403,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     }
   }
 
-  // NOTE: not currently wired to any button — the Start Delivery button
-  // and each status button below call rc.updateOrderStatus() directly so
-  // they can update this sheet's local state via onSuccess. Kept here in
-  // case a screen outside the sheet needs the same status-update +
-  // one-delivery-popup handling.
-  Future<void> _handleStatusUpdate({
-    required BuildContext context,
-    required RiderController rc,
-    required String orderId,
-    required String newStatus,
-  }) async {
-    final success = await rc.updateOrderStatus(orderId, newStatus);
-    if (!context.mounted) return;
-    if (success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Status updated: $newStatus'),
-          backgroundColor: primary,
-        ),
-      );
-    } else {
-      _showOneDeliveryDialog(context, rc.error);
-    }
-  }
-
-  void _showOneDeliveryDialog(BuildContext context, String message) {
-    showDialog(
-      context: context,
-      builder: (_) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-          decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.15),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: primary.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.local_shipping_rounded,
-                  color: primary,
-                  size: 26,
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'One Delivery at a Time',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                message.isNotEmpty
-                    ? message
-                    : 'You can only have one delivery in progress. Please complete your current delivery before starting another.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.black54,
-                  height: 1.4,
-                ),
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primary,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  child: const Text(
-                    'GOT IT',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   void _showOrderDetail({
     required BuildContext context,
     required Map<String, dynamic> data,
@@ -1487,7 +1416,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         data['deliveryAddress'] ?? data['delivery_address'] ?? 'No address';
     final totalBill = data['totalAmount'] ?? 0;
     final paymentMethod = data['paymentMethod'] ?? data['payment_method'] ?? '';
-    final phone = data['phoneNumber'] ?? data['phone_number'] ?? '';
+    final phone =
+        data['phone'] ?? data['phoneNumber'] ?? data['phone_number'] ?? '';
     final lat = data['latitude'];
     final lng = data['longitude'];
     final currentStatus = resolveOrderStatus(data);
@@ -1501,13 +1431,15 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
       builder: (_) => StatefulBuilder(
         builder: (context, setSheetState) {
           // Local session state for this sheet:
-          // - started: whether "Start Delivery" has been tapped (or the
-          //   order was already Picked Up/beyond when the sheet opened).
-          //   Unlocks the address and the PICKED UP button.
           // - localStatus: tracks progress through the sequence within
           //   this sheet so buttons update immediately after each tap
           //   without waiting for a Firestore stream refresh.
-          bool started = currentStatus != 'Accepted';
+          // 👈 FIX: removed the `started` flag entirely. There is no
+          // "Start Delivery" step any more, so the address and the
+          // ON THE WAY button are both usable as soon as the sheet opens
+          // (gated only by having coordinates for the address, and by
+          // the normal sequence logic for the buttons) instead of
+          // waiting for a tap that no longer exists.
           String localStatus = currentStatus;
 
           return StatefulBuilder(
@@ -1568,19 +1500,17 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                         'Rs. $totalBill',
                       ),
                       const SizedBox(height: 14),
-                      // Locked (greyed out, not tappable) until the rider
-                      // presses "Start Delivery". Once unlocked, tapping
-                      // the address opens navigation — this replaces the
-                      // separate "Navigate to Customer" button.
+                      // 👈 FIX: tapping the address opens navigation
+                      // immediately — only gated on actually having
+                      // coordinates, not on any "started" flag.
                       _detailRow(
                         Icons.location_on_rounded,
                         'Address',
                         address,
-                        onTap: (started && lat != null && lng != null)
+                        onTap: (lat != null && lng != null)
                             ? () => _openMap(lat.toDouble(), lng.toDouble())
                             : null,
                         isLink: true,
-                        locked: !started,
                       ),
                       const SizedBox(height: 24),
 
@@ -1600,81 +1530,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                         // ),
                         const SizedBox(height: 16),
 
-                        // Start Delivery: this is the real "start" of the
-                        // delivery. It writes orderStatus: 'Delivery
-                        // Started' and runs the one-active-delivery check —
-                        // if the rider already has another delivery in
-                        // progress, the warning popup appears here instead
-                        // of unlocking the rest of the sheet. On success it
-                        // unlocks the address + the sequential status
-                        // buttons below, and becomes disabled.
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              // Red until tapped, orange once started.
-                              backgroundColor: started
-                                  ? accentOrange
-                                  : _pendingRed,
-                              disabledBackgroundColor: accentOrange,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              elevation: started ? 0 : 3,
-                            ),
-                            icon: Icon(
-                              Icons.local_shipping_rounded,
-                              color: Colors.white,
-                            ),
-                            label: const Text(
-                              'Start Delivery',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            onPressed: started
-                                ? null
-                                : () async {
-                                    final success = await rc.updateOrderStatus(
-                                      orderId,
-                                      'Delivery Started',
-                                    );
-                                    if (!context.mounted) return;
-                                    if (success) {
-                                      setLocalState(() {
-                                        started = true;
-                                        localStatus = 'Delivery Started';
-                                      });
-                                    } else {
-                                      _showOneDeliveryDialog(context, rc.error);
-                                    }
-                                  },
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-
-                        _statusButton(
-                          label: 'PICKED UP',
-                          color: primary,
-                          orderId: orderId,
-                          targetStatus: 'Picked Up',
-                          localStatus: localStatus,
-                          started: started,
-                          rc: rc,
-                          onSuccess: (s) =>
-                              setLocalState(() => localStatus = s),
-                        ),
-                        const SizedBox(height: 10),
                         _statusButton(
                           label: 'ON THE WAY',
                           color: Colors.orange.shade700,
                           orderId: orderId,
                           targetStatus: 'On the Way',
                           localStatus: localStatus,
-                          started: started,
                           rc: rc,
                           onSuccess: (s) =>
                               setLocalState(() => localStatus = s),
@@ -1686,7 +1547,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                           orderId: orderId,
                           targetStatus: 'Delivered',
                           localStatus: localStatus,
-                          started: started,
                           rc: rc,
                           onSuccess: (s) =>
                               setLocalState(() => localStatus = s),
@@ -1710,8 +1570,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   // completed, can't be re-selected).
   static const List<String> _statusSequence = [
     'Accepted',
-    'Delivery Started',
-    'Picked Up',
     'On the Way',
     'Delivered',
   ];
@@ -1727,7 +1585,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     required String orderId,
     required String targetStatus,
     required String localStatus,
-    required bool started,
     required RiderController rc,
     required void Function(String newStatus) onSuccess,
   }) {
@@ -1735,7 +1592,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     final targetIndex = _statusStepIndex(targetStatus);
 
     final bool isDone = currentIndex >= targetIndex;
-    final bool isActive = started && !isDone && currentIndex == targetIndex - 1;
+    // 👈 FIX: no more `started &&` gate — ON THE WAY (the first button,
+    // targetIndex 1) is active as soon as currentIndex is 0 (Accepted).
+    // Orders still saved with an old 'Picked Up' status also count as 0, so
+    // they can go straight to ON THE WAY.
+    final bool isActive = !isDone && currentIndex == targetIndex - 1;
 
     // Red until the rider taps it; orange once done. (The per-button
     // `color` argument is no longer used for the fill.)
@@ -1808,7 +1669,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                   onSuccess(targetStatus);
                   _showTopBanner(context, 'Order marked as $label');
                 } else {
-                  _showOneDeliveryDialog(context, rc.error);
+                  _showTopBanner(context, 'Failed to update status');
                 }
               }
             : null,
@@ -1992,10 +1853,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   }
 }
 
-// ── Top-of-screen message banner ─────────────────────────────────────
-// Shown on the ROOT overlay so it sits above bottom sheets/dialogs, at
-// the top of the screen where it's easy to see (a normal SnackBar
-// renders at the bottom, hidden behind the order-details bottom sheet).
 void _showTopBanner(
   BuildContext context,
   String message, {

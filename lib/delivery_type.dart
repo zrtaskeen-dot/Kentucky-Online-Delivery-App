@@ -80,8 +80,18 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       TextEditingController();
   final FirestoreService _firestoreService = FirestoreService();
 
-  String _receiverPhone = "03185940648";
-  bool _loadingManagerPhone = false;
+  // EasyPaisa / JazzCash numbers come from Firestore: payment_method/{branchId}
+  // with fields 'easyPaisaNumber' and 'jazzCashNumber'.
+  String _easyPaisaNumber = '';
+  String _jazzCashNumber = '';
+  bool _loadingPaymentNumbers = false;
+
+  // Number to pay, according to the provider the user selected.
+  String get _receiverPhone {
+    if (_selectedProvider == 'EasyPaisa') return _easyPaisaNumber;
+    if (_selectedProvider == 'JazzCash') return _jazzCashNumber;
+    return '';
+  }
 
   static const String _cloudinaryUrl =
       "https://api.cloudinary.com/v1_1/dqjqkwwwh/image/upload";
@@ -92,7 +102,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchRestaurantTiming();
-      _fetchManagerPhone();
+      _fetchPaymentNumbers();
     });
   }
 
@@ -121,8 +131,8 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     }
   }
 
-  Future<void> _fetchManagerPhone() async {
-    setState(() => _loadingManagerPhone = true);
+  Future<void> _fetchPaymentNumbers() async {
+    setState(() => _loadingPaymentNumbers = true);
     try {
       final branchId = Provider.of<CartProvider>(
         context,
@@ -130,35 +140,30 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       ).selectedBranchId;
 
       if (branchId.isEmpty) {
-        setState(() => _loadingManagerPhone = false);
+        if (mounted) setState(() => _loadingPaymentNumbers = false);
         return;
       }
 
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .where('branchId', isEqualTo: branchId)
-          .where('role', isEqualTo: 'manager')
-          .limit(1)
+      final doc = await FirebaseFirestore.instance
+          .collection('payment_method')
+          .doc(branchId)
           .get();
 
-      if (snap.docs.isNotEmpty) {
-        final data = snap.docs.first.data();
-        final phone = (data['phone'] ?? data['phone_number'] ?? '')
-            .toString()
-            .trim();
-        if (phone.isNotEmpty) {
-          setState(() {
-            _receiverPhone = phone;
-            _loadingManagerPhone = false;
-          });
-          return;
-        }
+      if (!mounted) return;
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        setState(() {
+          _easyPaisaNumber = (data['easyPaisaNumber'] ?? '').toString().trim();
+          _jazzCashNumber = (data['jazzCashNumber'] ?? '').toString().trim();
+          _loadingPaymentNumbers = false;
+        });
+        return;
       }
 
-      setState(() => _loadingManagerPhone = false);
+      setState(() => _loadingPaymentNumbers = false);
     } catch (e) {
-      debugPrint('Failed to fetch manager phone: $e');
-      setState(() => _loadingManagerPhone = false);
+      debugPrint('Failed to fetch payment numbers: $e');
+      if (mounted) setState(() => _loadingPaymentNumbers = false);
     }
   }
 
@@ -782,8 +787,18 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           .where('userId', isEqualTo: userId)
           .get();
 
+      // Sirf isi branch ke items delete karo jahan se order hua; doosri
+      // branches ke cart items mehfooz rehte hain.
+      final activeBranchId = Provider.of<CartProvider>(
+        context,
+        listen: false,
+      ).selectedBranchId;
+
       for (final doc in cartDocs.docs) {
-        await doc.reference.delete();
+        final docBranchId = (doc.data()['branchId'] ?? '').toString();
+        if (docBranchId.isEmpty || docBranchId == activeBranchId) {
+          await doc.reference.delete();
+        }
       }
     } catch (e) {
       debugPrint('Failed to clear cart: $e');
@@ -863,9 +878,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         deliveryTime: deliveryTimeLabel,
         paymentMethod: finalPaymentMethod,
         cartItems: widget.cartItems,
-        // transactionId: _transactionIdController.text.isNotEmpty
-        //     ? _transactionIdController.text
-        //     : "N/A",
+       
         branchId: activeBranchId,
         receiptImageUrl: receiptImageUrl,
       );
@@ -877,7 +890,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       if (uid != null) {
         try {
           await FirebaseFirestore.instance.collection('users').doc(uid).set({
-            'phone_number': widget.userPhone,
+            'phone': widget.userPhone,
             'address': widget.addressDetails,
             'lat': widget.selectedLocation.latitude,
             'lng': widget.selectedLocation.longitude,
@@ -1622,6 +1635,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
               ),
               InkWell(
                 onTap: () {
+                  if (_receiverPhone.isEmpty) return;
                   Clipboard.setData(ClipboardData(text: _receiverPhone));
                   _showThemedSnack("Number copied!", isError: false);
                 },
@@ -1653,7 +1667,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          _loadingManagerPhone
+          _loadingPaymentNumbers
               ? const SizedBox(
                   height: 20,
                   width: 20,
@@ -1663,7 +1677,9 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                   ),
                 )
               : Text(
-                  _receiverPhone,
+                  _receiverPhone.isEmpty
+                      ? 'Number not available for ${_selectedProvider ?? 'this method'}'
+                      : _receiverPhone,
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -1968,18 +1984,18 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           const SizedBox(height: 14),
           _summaryRow("Total Items", "$totalItemCount"),
           _summaryRow(
-            "Delivery Charges",
+            "Delivery Fee",
             deliveryCharge == 0
                 ? "FREE"
                 : "RS. ${deliveryCharge.toStringAsFixed(0)}",
           ),
-          _summaryRow("Total", "RS. ${itemsTotal.toStringAsFixed(0)}"),
+          _summaryRow("Subtotal", "RS. ${itemsTotal.toStringAsFixed(0)}"),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 6),
             child: Divider(height: 1, color: Colors.black12),
           ),
           _summaryRow(
-            "Grand Total",
+            "Total",
             "RS. ${grandTotal.toStringAsFixed(0)}",
             emphasize: true,
           ),
@@ -2069,7 +2085,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         _scheduledTime != null) {
       return "${_formatDate(_scheduledDate!)} at ${_formatTime(_scheduledTime!)}";
     }
-    return "As soon as possible";
+    return "Standard Delivery";
   }
 
   void _showOrderReviewSheet() {
@@ -2191,7 +2207,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        _reviewSectionLabel("Grand Total"),
+                        _reviewSectionLabel("Total"),
                         const SizedBox(height: 6),
                         Text(
                           "RS. ${widget.totalAmount.toStringAsFixed(0)}",

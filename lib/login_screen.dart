@@ -33,10 +33,9 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
 
   static const Color bgColor = Colors.white;
-  static const Color themeColor = Color(0xFFA70000); // Maroon (same as Home)
+  static const Color themeColor = Color(0xFFA70000);
   static const Color creamColor = Color(0xFFFEF9E7);
-  static const Color fieldColor = Color(0xFFFFFDFA); // same as Home's card tint
-
+  static const Color fieldColor = Color(0xFFFFFDFA); 
   static const Color successBorder = Color(0xFF4A7C59);
   static const Color successBg = Color(0xFFEAF3ED);
   static const Color successText = Color(0xFF2F5B3E);
@@ -109,17 +108,18 @@ class _LoginScreenState extends State<LoginScreen> {
     required String action,
     required String performedBy,
     required String role,
-    required String branch,
+    String? branch,
     required String details,
   }) async {
     try {
-      final payload = {
+      // system_log aur activity_logs dono ka format same: camelCase,
+      // role nahi, branch sirf rider ke liye (customer ke liye branch field hi nahi).
+      final payload = <String, dynamic>{
         'action': action,
-        'performed_by': performedBy,
-        'role': role,
-        'branch': branch,
+        'performedBy': performedBy,
+        if (branch != null) 'branch': branch,
         'details': details,
-        'created_at': FieldValue.serverTimestamp(),
+        'createdAt': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection("system_log").add(payload);
       await FirebaseFirestore.instance.collection("activity_logs").add(payload);
@@ -186,6 +186,15 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+
+  // Staff = any roleId other than customer (R001), or a legacy text role.
+  bool _isStaffData(Map<String, dynamic>? data) {
+    if (data == null) return false;
+    final roleId = (data['roleId'] ?? '').toString().trim();
+    if (roleId.isNotEmpty && roleId != roleMap['customer']) return true;
+    final role = (data['role'] ?? '').toString().trim().toLowerCase();
+    return const {'rider', 'manager', 'admin', 'owner'}.contains(role);
   }
 
   Future<void> _signIn() async {
@@ -303,8 +312,26 @@ class _LoginScreenState extends State<LoginScreen> {
 
         final userId = userDoc.id;
         final userData = userDoc.data()!;
-        final customerName = (userData['name'] ?? userData['fullName'] ?? email)
-            .toString();
+
+        // NEW: staff accounts must not get into the Customer app.
+        final existingRoleId = (userData['roleId'] ?? '').toString();
+        final legacyRole = (userData['role'] ?? '').toString().toLowerCase();
+        if (existingRoleId == roleMap['rider'] || legacyRole == 'rider') {
+          await FirebaseAuth.instance.signOut();
+          _showSnack("This is a rider account. Please use the Rider app.");
+          return;
+        }
+        if (widget.role == 'customer' && _isStaffData(userData)) {
+          await FirebaseAuth.instance.signOut();
+          _showSnack(
+            "This is a manag account. Please use the Rider app.",
+          );
+          return;
+        }
+
+        final customerName =
+            (userData['name'] ?? userData['fullName'] ?? user.displayName ?? email)
+                .toString();
 
         final userStatus = (userData['status'] ?? 'active').toString();
         if (userStatus == 'blocked') {
@@ -315,9 +342,30 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        await FirebaseFirestore.instance.collection('users').doc(userId).update(
-          {'emailVerified': true},
-        );
+        // NEW: besides emailVerified, fill in any profile fields that are
+        // missing (accounts created before the sign-up fix only had the
+        // FCM token). Existing values are never overwritten.
+        final profileFix = <String, dynamic>{'emailVerified': true};
+        final hasName =
+            (userData['name'] ?? '').toString().isNotEmpty ||
+            (userData['fullName'] ?? '').toString().isNotEmpty;
+        if (!hasName && (user.displayName ?? '').isNotEmpty) {
+          profileFix['name'] = user.displayName;
+        }
+        if ((userData['email'] ?? '').toString().isEmpty &&
+            (user.email ?? '').isNotEmpty) {
+          profileFix['email'] = user.email;
+        }
+        if (existingRoleId.isEmpty && widget.role == 'customer') {
+          profileFix['roleId'] = roleMap['customer'];
+        }
+        if (userData['createdAt'] == null) {
+          profileFix['createdAt'] = FieldValue.serverTimestamp();
+        }
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .update(profileFix);
 
         // 👈 ADDED: save this device's FCM token now that we know
         // who's logged in.
@@ -328,7 +376,6 @@ class _LoginScreenState extends State<LoginScreen> {
           action: 'Customer Login',
           performedBy: customerName,
           role: widget.role == 'owner' ? 'Owner' : 'Customer',
-          branch: '',
           details:
               '${widget.role == 'owner' ? 'Owner' : 'Customer'} "$customerName" logged in to the app',
         );
@@ -386,14 +433,26 @@ class _LoginScreenState extends State<LoginScreen> {
       final user = userCredential.user;
 
       if (user != null) {
-        if (guestUid != null) {
-          await _migrateGuestCart(guestUid, user.uid);
-        }
-
         final userDoc = FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid);
         final docSnap = await userDoc.get();
+
+        // NEW: staff accounts can't enter the Customer app via Google.
+        if (widget.role == 'customer' &&
+            docSnap.exists &&
+            _isStaffData(docSnap.data())) {
+          await FirebaseAuth.instance.signOut();
+          await GoogleSignIn().signOut();
+          _showSnack(
+            "This is a staff account. It can't be used in the Customer app.",
+          );
+          return;
+        }
+
+        if (guestUid != null) {
+          await _migrateGuestCart(guestUid, user.uid);
+        }
 
         if (!docSnap.exists) {
           await userDoc.set({
@@ -419,7 +478,6 @@ class _LoginScreenState extends State<LoginScreen> {
           action: 'Customer Login',
           performedBy: googleName,
           role: 'Customer',
-          branch: '',
           details: 'Customer "$googleName" logged in to the app (Google)',
         );
 
@@ -508,8 +566,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 8),
 
                       SizedBox(
-                        width: double.infinity,
-                        height: 54,
+                        width: 220,
+                        height: 50,
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _signIn,
                           style: ElevatedButton.styleFrom(
@@ -674,23 +732,13 @@ class _LoginScreenState extends State<LoginScreen> {
     Widget? suffixIcon,
     String? Function(String?)? validator,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: TextFormField(
+    return TextFormField(
         controller: controller,
         keyboardType: keyboardType,
         obscureText: obscureText,
         style: const TextStyle(
-          fontWeight: FontWeight.w500,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
           color: Colors.black87,
         ),
         validator: validator,
@@ -700,23 +748,25 @@ class _LoginScreenState extends State<LoginScreen> {
           prefixIcon: Icon(icon, color: themeColor, size: 20),
           suffixIcon: suffixIcon,
           labelText: label,
-          labelStyle: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-          contentPadding: const EdgeInsets.symmetric(vertical: 16),
+          labelStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 16,
+            horizontal: 12,
+          ),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.black26, width: 1.0),
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Colors.black38),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.black26, width: 1.0),
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: Colors.black38),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
+            borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: themeColor, width: 1.6),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildDivider() {
@@ -737,8 +787,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Widget _buildGoogleButton({required String label, VoidCallback? onTap}) {
     return SizedBox(
-      width: double.infinity,
-      height: 52,
+      width: 220,
+      height: 48,
       child: OutlinedButton.icon(
         onPressed: onTap,
         style: OutlinedButton.styleFrom(
@@ -758,7 +808,7 @@ class _LoginScreenState extends State<LoginScreen> {
           style: const TextStyle(
             color: Colors.black87,
             fontWeight: FontWeight.w600,
-            fontSize: 14,
+            fontSize: 13,
           ),
         ),
       ),

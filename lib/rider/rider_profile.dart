@@ -55,16 +55,21 @@ class RiderProfileScreen extends StatefulWidget {
 }
 
 class _RiderProfileScreenState extends State<RiderProfileScreen> {
+  static const bgColor = RiderProfileScreen.bgColor;
+  static const cardColor = RiderProfileScreen.cardBgColor;
+  static const primary = RiderProfileScreen.primary;
+
+  // Phone number mein 11 digits se zyada nahi ho sakte.
+  static const int _maxPhoneDigits = 11;
+
   final String _cloudName = "dqjqkwwwh";
   final String _uploadPreset = "rider_profiles";
 
   final ImagePicker _picker = ImagePicker();
   bool _isUploadingImage = false;
-  bool _isLoggingOut = false;
 
   // -- LOGOUT METHOD --
   Future<void> _logout() async {
-    setState(() => _isLoggingOut = true);
     try {
       await FirebaseAuth.instance.signOut();
 
@@ -76,20 +81,12 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
             'Logged out successfully',
             style: TextStyle(color: Colors.white),
           ),
-          backgroundColor: RiderProfileScreen.primary,
+          backgroundColor: primary,
         ),
       );
 
-      // popUntil((route) => route.isFirst) only pops back to whatever
-      // route happened to be first in this Navigator's stack — it does
-      // NOT guarantee landing on Role Selection, and it can resolve to a
-      // nested Navigator (e.g. inside a bottom-nav bar) instead of the
-      // app's root one. That's why the rider stayed "logged in" visually
-      // until the app was fully closed and reopened.
-      // Using the root navigator + pushNamedAndRemoveUntil('/', ...)
-      // guarantees we land on the app's actual entry route (Role
-      // Selection) and clears every screen — including RiderHomeScreen —
-      // out of memory, same as the customer logout flow already does.
+      // Root navigator + pushNamedAndRemoveUntil('/', ...) taake bottom-nav
+      // ke nested Navigator mein na phanse aur har screen clear ho jaye.
       Navigator.of(
         context,
         rootNavigator: true,
@@ -103,8 +100,6 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
           ),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isLoggingOut = false);
     }
   }
 
@@ -146,7 +141,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                 'Profile photo updated',
                 style: TextStyle(color: Colors.white),
               ),
-              backgroundColor: RiderProfileScreen.primary,
+              backgroundColor: primary,
             ),
           );
         }
@@ -167,171 +162,245 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
     }
   }
 
-  // -- POPUP DIALOG TO EDIT PROFILE DATA --
-  void _showEditProfileDialog(Map<String, dynamic> currentData) {
-    final nameController = TextEditingController(
-      text: currentData['name'] ?? '',
-    );
-    final phoneController = TextEditingController(
-      text: currentData['phone'] ?? '',
-    );
-    final emailController = TextEditingController(
-      text: currentData['email'] ?? '',
-    );
-    final cnicController = TextEditingController(
-      text: currentData['cnic'] ?? '',
-    );
+  // ── Tap-to-edit dialog (customer ProfileScreen wala same dialog) ──
+  void _editField(String fieldKey, String fieldLabel, String currentValue) {
+    final isPhone = fieldKey == 'phone';
+    final isName = fieldKey == 'name';
 
-    bool isSaving = false;
+    var initial = currentValue == 'Not set' ? '' : currentValue;
+    if (isPhone) {
+      initial = initial.replaceAll(RegExp(r'\D'), '');
+      if (initial.length > _maxPhoneDigits) {
+        initial = initial.substring(initial.length - _maxPhoneDigits);
+      }
+    }
+    final controller = TextEditingController(text: initial);
 
-    showDialog(
+    final iconMap = {
+      'name': Icons.person_outline_rounded,
+      'phone': Icons.phone_outlined,
+    };
+
+    // StatefulBuilder ke BAHAR, warna har rebuild par null ho jata hai.
+    String? fieldError;
+
+    showGeneralDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (context) {
+      barrierDismissible: true,
+      barrierLabel: '',
+      barrierColor: Colors.black45,
+      transitionDuration: const Duration(milliseconds: 300),
+      transitionBuilder: (_, anim, __, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.15),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutCubic)),
+          child: FadeTransition(opacity: anim, child: child),
+        );
+      },
+      pageBuilder: (ctx, _, __) {
         return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: RiderProfileScreen.cardBgColor,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: const Text(
-                'Edit Profile',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black,
-                ),
-              ),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Editable Name Field
-                    TextField(
-                      controller: nameController,
-                      textCapitalization: TextCapitalization.words,
-                      inputFormatters: [CapitalizeWordsFormatter()],
-                      decoration: const InputDecoration(
-                        labelText: 'Full Name',
-                        prefixIcon: Icon(
-                          Icons.person,
-                          color: RiderProfileScreen.primary,
-                        ),
-                        border: OutlineInputBorder(),
+          builder: (ctx, setDialogState) {
+            return Center(
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 28),
+                  padding: const EdgeInsets.all(28),
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primary.withValues(alpha: 0.12),
+                        blurRadius: 30,
+                        offset: const Offset(0, 10),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Editable Phone Field
-                    TextField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone Number',
-                        prefixIcon: Icon(
-                          Icons.phone,
-                          color: RiderProfileScreen.primary,
-                        ),
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Fixed / Disabled Email Field
-                    TextField(
-                      controller: emailController,
-                      enabled: false,
-                      decoration: InputDecoration(
-                        labelText: 'Email Address (Fixed)',
-                        prefixIcon: const Icon(Icons.email, color: Colors.grey),
-                        border: const OutlineInputBorder(),
-                        filled: true,
-                        fillColor: Colors.grey.shade200,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Fixed / Disabled CNIC Field
-                    TextField(
-                      controller: cnicController,
-                      enabled: false,
-                      decoration: InputDecoration(
-                        labelText: 'CNIC (Fixed)',
-                        prefixIcon: const Icon(Icons.badge, color: Colors.grey),
-                        border: const OutlineInputBorder(),
-                        filled: true,
-                        fillColor: Colors.grey.shade200,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: isSaving ? null : () => Navigator.pop(context),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.grey),
+                    ],
                   ),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: RiderProfileScreen.primary,
-                  ),
-                  onPressed: isSaving
-                      ? null
-                      : () async {
-                          setDialogState(() => isSaving = true);
-
-                          try {
-                            await FirebaseFirestore.instance
-                                .collection('users')
-                                .doc(widget.riderId)
-                                .update({
-                                  'name': nameController.text.trim(),
-                                  'phone': phoneController.text.trim(),
-                                });
-
-                            if (mounted) {
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Profile updated successfully',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                  backgroundColor: RiderProfileScreen.primary,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: const BoxDecoration(
+                          color: cardColor,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          iconMap[fieldKey] ?? Icons.edit_outlined,
+                          color: Colors.black54,
+                          size: 28,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Edit $fieldLabel',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Update your $fieldLabel below',
+                        style: TextStyle(fontSize: 13, color: Colors.grey[500]),
+                      ),
+                      const SizedBox(height: 22),
+                      TextField(
+                        controller: controller,
+                        autofocus: true,
+                        keyboardType: isPhone
+                            ? TextInputType.phone
+                            : TextInputType.text,
+                        textCapitalization: isName
+                            ? TextCapitalization.words
+                            : TextCapitalization.none,
+                        maxLength: isPhone ? _maxPhoneDigits : null,
+                        inputFormatters: isPhone
+                            ? [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(
+                                  _maxPhoneDigits,
                                 ),
-                              );
-                            }
-                          } catch (e) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Update failed: $e'),
-                                  backgroundColor: Colors.black87,
-                                ),
-                              );
-                            }
-                          } finally {
-                            setDialogState(() => isSaving = false);
+                              ]
+                            : (isName ? [CapitalizeWordsFormatter()] : null),
+                        onChanged: (_) {
+                          if (fieldError != null) {
+                            setDialogState(() => fieldError = null);
                           }
                         },
-                  child: isSaving
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
+                        decoration: InputDecoration(
+                          prefixIcon: Icon(
+                            iconMap[fieldKey] ?? Icons.edit_outlined,
+                            color: Colors.black45,
+                            size: 20,
                           ),
-                        )
-                      : const Text(
-                          'Save',
-                          style: TextStyle(color: Colors.white),
+                          hintText: 'Enter $fieldLabel',
+                          counterText: isPhone ? '' : null,
+                          errorText: fieldError,
+                          filled: true,
+                          fillColor: cardColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: const BorderSide(
+                              color: primary,
+                              width: 1.5,
+                            ),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                            horizontal: 16,
+                          ),
                         ),
+                      ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(
+                                  color: Color(0xFFDDDDDD),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: Colors.grey,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: primary,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                elevation: 0,
+                              ),
+                              onPressed: () async {
+                                final newVal = controller.text.trim();
+
+                                if (newVal.isEmpty) {
+                                  setDialogState(
+                                    () => fieldError =
+                                        '$fieldLabel cannot be empty',
+                                  );
+                                  return;
+                                }
+
+                                Navigator.pop(ctx);
+
+                                try {
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(widget.riderId)
+                                      .set({
+                                        fieldKey: newVal,
+                                      }, SetOptions(merge: true));
+
+                                  // Auth ka displayName bhi sync rakho.
+                                  if (isName) {
+                                    await FirebaseAuth.instance.currentUser
+                                        ?.updateDisplayName(newVal);
+                                  }
+
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        "$fieldLabel updated successfully",
+                                      ),
+                                      backgroundColor: primary,
+                                    ),
+                                  );
+                                } catch (e) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text("Update failed: $e"),
+                                      backgroundColor: Colors.black87,
+                                    ),
+                                  );
+                                }
+                              },
+                              child: const Text(
+                                'Save',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ],
+              ),
             );
           },
         );
@@ -339,19 +408,92 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
     );
   }
 
+  // ── Rider ki rectangular fields ──
+  static const TextStyle _fieldTextStyle = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.w600,
+    color: Colors.black87,
+  );
+
+  InputDecoration _boxDecoration(
+    String label,
+    IconData icon, {
+    bool locked = false,
+  }) {
+    OutlineInputBorder border(Color color, [double width = 1.0]) =>
+        OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: color, width: width),
+        );
+
+    return InputDecoration(
+      labelText: label,
+      labelStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+      prefixIcon: Icon(icon, size: 20, color: primary),
+      filled: true,
+      fillColor: cardColor,
+      contentPadding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      border: border(Colors.black38),
+      enabledBorder: border(Colors.black38),
+      disabledBorder: border(Colors.black38),
+      focusedBorder: border(primary, 1.6),
+    );
+  }
+
+  // fieldKey diya ho to tap par edit dialog khulta hai, warna field locked.
+  Widget _profileFieldBox({
+    required IconData icon,
+    required String label,
+    required String value,
+    String? fieldKey,
+  }) {
+    final locked = fieldKey == null;
+    final field = TextFormField(
+      // Value badalne par naya text foran dikhane ke liye key.
+      key: ValueKey('$label:$value'),
+      initialValue: value,
+      readOnly: true,
+      enabled: !locked,
+      style: _fieldTextStyle,
+      decoration: _boxDecoration(label, icon, locked: locked).copyWith(
+        suffixIcon: locked
+            ? const Icon(
+                Icons.lock_outline_rounded,
+                size: 16,
+                color: Colors.black26,
+              )
+            : const Icon(Icons.edit_outlined, size: 18, color: Colors.black38),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: locked
+          ? field
+          : GestureDetector(
+              onTap: () => _editField(fieldKey, label, value),
+              child: AbsorbPointer(child: field),
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: RiderProfileScreen.bgColor,
+      backgroundColor: bgColor,
       appBar: AppBar(
         automaticallyImplyLeading: false,
+        backgroundColor: bgColor,
+        elevation: 0,
         title: const Text(
           'My Profile',
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.black87,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
         ),
-        backgroundColor: RiderProfileScreen.bgColor,
         centerTitle: true,
-        elevation: 0,
       ),
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance
@@ -361,232 +503,135 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
         builder: (context, snapshot) {
           if (!snapshot.hasData || !snapshot.data!.exists) {
             return const Center(
-              child: CircularProgressIndicator(
-                color: RiderProfileScreen.primary,
-              ),
+              child: CircularProgressIndicator(color: primary),
             );
           }
 
           final userData = snapshot.data!.data() as Map<String, dynamic>;
-          final imageUrl = userData['imageUrl'] ?? '';
+          final String imageUrl = (userData['imageUrl'] ?? '').toString();
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Column(
               children: [
-                const SizedBox(height: 10),
+                const SizedBox(height: 16),
 
-                // -- CLICKABLE PROFILE IMAGE --
+                // Interactive Profile Picture Avatar (customer jaisa)
                 GestureDetector(
                   onTap: _isUploadingImage ? null : _pickProfileImage,
                   child: Stack(
+                    alignment: Alignment.bottomRight,
                     children: [
-                      CircleAvatar(
-                        radius: 52,
-                        backgroundColor: RiderProfileScreen.primary,
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.fromBorderSide(
+                            BorderSide(color: primary, width: 2.5),
+                          ),
+                        ),
                         child: CircleAvatar(
-                          radius: 49,
-                          backgroundColor: Colors.grey.shade300,
+                          radius: 52,
+                          backgroundColor: const Color(0xFFE0E0E0),
                           backgroundImage: imageUrl.isNotEmpty
                               ? NetworkImage(imageUrl)
                               : null,
-                          child: imageUrl.isEmpty
+                          child: _isUploadingImage
+                              ? const CircularProgressIndicator(color: primary)
+                              : imageUrl.isEmpty
                               ? const Icon(
-                                  Icons.person,
-                                  size: 60,
+                                  Icons.person_rounded,
+                                  size: 56,
                                   color: Colors.white,
                                 )
                               : null,
                         ),
                       ),
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: const BoxDecoration(
-                            color: RiderProfileScreen.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: _isUploadingImage
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.camera_alt,
-                                  color: Colors.white,
-                                  size: 18,
-                                ),
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: const BoxDecoration(
+                          color: primary,
+                          shape: BoxShape.circle,
                         ),
+                        child: const Icon(
+                          Icons.camera_alt_rounded,
+                          size: 15,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+
+                // -- PROFILE DATA (rider ki fields) --
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: cardColor,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color.fromRGBO(0, 0, 0, 0.05),
+                        blurRadius: 12,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      _profileFieldBox(
+                        icon: Icons.person_outline_rounded,
+                        label: 'Full Name',
+                        value: (userData['name'] ?? 'Not set').toString(),
+                        fieldKey: 'name',
+                      ),
+                      _profileFieldBox(
+                        icon: Icons.phone_outlined,
+                        label: 'Phone Number',
+                        value: (userData['phone'] ?? 'Not set').toString(),
+                        fieldKey: 'phone',
+                      ),
+                      _profileFieldBox(
+                        icon: Icons.email_outlined,
+                        label: 'Email Address',
+                        value: (userData['email'] ?? 'Not set').toString(),
+                      ),
+                      _profileFieldBox(
+                        icon: Icons.badge_outlined,
+                        label: 'CNIC Number',
+                        value: (userData['cnic'] ?? 'Not set').toString(),
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 24),
 
-                // -- PROFILE DATA DISPLAY CARD --
-                Card(
-                  color: RiderProfileScreen.cardBgColor,
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                // -- LOGOUT BUTTON (customer jaisa: 220x50, radius 30) --
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primary,
+                    fixedSize: const Size(220, 50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    elevation: 0,
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      children: [
-                        ListTile(
-                          leading: const Icon(
-                            Icons.person,
-                            color: RiderProfileScreen.primary,
-                          ),
-                          title: const Text(
-                            'Full Name',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                          subtitle: Text(
-                            userData['name'] ?? 'Not set',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                        const Divider(),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.phone,
-                            color: RiderProfileScreen.primary,
-                          ),
-                          title: const Text(
-                            'Phone Number',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                          subtitle: Text(
-                            userData['phone'] ?? 'Not set',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                        const Divider(),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.email,
-                            color: RiderProfileScreen.primary,
-                          ),
-                          title: const Text(
-                            'Email Address',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                          subtitle: Text(
-                            userData['email'] ?? 'Not set',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                        const Divider(),
-                        ListTile(
-                          leading: const Icon(
-                            Icons.badge,
-                            color: RiderProfileScreen.primary,
-                          ),
-                          title: const Text(
-                            'CNIC Number',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                          subtitle: Text(
-                            userData['cnic'] ?? 'Not set',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                      ],
+                  icon: const Icon(
+                    Icons.logout_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  label: const Text(
+                    'Logout',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
-                ),
-                const SizedBox(height: 20),
-
-                // -- EDIT PROFILE BUTTON --
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(
-                        color: RiderProfileScreen.primary,
-                        width: 2,
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    icon: const Icon(
-                      Icons.edit,
-                      color: RiderProfileScreen.primary,
-                    ),
-                    label: const Text(
-                      'Edit Profile Details',
-                      style: TextStyle(
-                        color: RiderProfileScreen.primary,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    onPressed: () => _showEditProfileDialog(userData),
-                  ),
-                ),
-
-                const SizedBox(height: 14),
-
-                // -- LOGOUT BUTTON --
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: RiderProfileScreen.primary,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      elevation: 3,
-                    ),
-                    icon: _isLoggingOut
-                        ? const SizedBox.shrink()
-                        : const Icon(Icons.logout, color: Colors.white),
-                    label: _isLoggingOut
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text(
-                            'Logout',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                    onPressed: _isLoggingOut ? null : _logout,
-                  ),
+                  onPressed: _logout,
                 ),
                 const SizedBox(height: 20),
               ],

@@ -17,17 +17,38 @@ class CartItem {
 }
 
 class CartProvider with ChangeNotifier {
-  final List<CartItem> _items = [];
+  // Har branch ka apna cart: branchId -> us branch ke items.
+  // Cart system aik hi hai, bas items us branch ke hisaab se yaad rehte hain
+  // jahan se add kiye gaye.
+  final Map<String, List<CartItem>> _branchItems = {};
   String _selectedBranchId = ''; // Active branch id state
   double _deliveryCharge = 50; // Fallback until the branch's own value loads
 
-  List<CartItem> get items => _items;
+  // Sirf ACTIVE branch ke items (baqi sab getters isi par chalte hain).
+  List<CartItem> get items =>
+      _branchItems.putIfAbsent(_selectedBranchId, () => <CartItem>[]);
 
   // Getter: read the active branch id from any screen.
   String get selectedBranchId => _selectedBranchId;
 
   // Setter: call this when the branch is changed on HomeScreen.
   void setBranchId(String branchId) {
+    // Branch select hone se pehle jo items add hue (key ''), wo pehli
+    // asli branch ke cart mein shamil kar do, warna gum ho jate.
+    if (_selectedBranchId.isEmpty && branchId.isNotEmpty) {
+      final orphans = _branchItems.remove('');
+      if (orphans != null && orphans.isNotEmpty) {
+        final target = _branchItems.putIfAbsent(branchId, () => <CartItem>[]);
+        for (final item in orphans) {
+          final i = target.indexWhere((e) => e.name == item.name);
+          if (i >= 0) {
+            target[i].quantity += item.quantity;
+          } else {
+            target.add(item);
+          }
+        }
+      }
+    }
     _selectedBranchId = branchId;
     notifyListeners(); // Notifies the whole app of the branch change.
   }
@@ -40,30 +61,32 @@ class CartProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  // Updated Cart badge count: returns total sum of item quantities.
-  int get itemCount => _items.fold(0, (sum, item) => sum + item.quantity);
+  // Cart badge count: ACTIVE branch ke items ki quantity ka total.
+  int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 
   double get totalPrice {
-    return _items.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
+    return items.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
   }
 
   void addItem(CartItem item) {
-    final index = _items.indexWhere((element) => element.name == item.name);
+    final list = items;
+    final index = list.indexWhere((element) => element.name == item.name);
     if (index >= 0) {
-      _items[index].quantity += item.quantity;
+      list[index].quantity += item.quantity;
     } else {
-      _items.add(item);
+      list.add(item);
     }
     notifyListeners();
   }
 
   void removeItem(String name) {
-    _items.removeWhere((item) => item.name == name);
+    items.removeWhere((item) => item.name == name);
     notifyListeners();
   }
 
+  
   void clearCart() {
-    _items.clear();
+    items.clear();
     notifyListeners();
   }
 }

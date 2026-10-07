@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'main_navigation.dart'; // Customer ki MainScreen/HomeScreen
 import 'onboarding/page3.dart';     // Onboarding / Login Page
 import 'rider/rider_home_screen.dart';
+import 'global_feedback_listener.dart' show customerHomeReady;
 
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
@@ -73,7 +74,7 @@ class AuthWrapper extends StatelessWidget {
               }
 
               // Default Customer Screen
-              return const MainScreen();
+              return const _HomeReadySignal(child: MainScreen());
             },
           );
         }
@@ -83,4 +84,33 @@ class AuthWrapper extends StatelessWidget {
       },
     );
   }
+}
+
+// Tells GlobalFeedbackListener that the customer's home screen is now on
+// screen, so the feedback popup can safely appear (not during splash).
+class _HomeReadySignal extends StatefulWidget {
+  final Widget child;
+  const _HomeReadySignal({required this.child});
+
+  @override
+  State<_HomeReadySignal> createState() => _HomeReadySignalState();
+}
+
+class _HomeReadySignalState extends State<_HomeReadySignal> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      customerHomeReady.value = true;
+    });
+  }
+
+  @override
+  void dispose() {
+    customerHomeReady.value = false;
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

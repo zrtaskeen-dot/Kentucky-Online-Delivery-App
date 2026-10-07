@@ -56,9 +56,11 @@ class _SignUpScreenState extends State<SignUpScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
 
   // ── Theme ──
   static const Color bgColor = Colors.white;
@@ -75,11 +77,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
   static const Color errorBg = Color(0xFFFDECEA);
   static const Color errorText = Color(0xFFB71C1C);
 
-  final Map<String, String> roleMap = {
-    'customer': 'R001',
-    'rider': 'R002',
-    'admin': 'R003',
-  };
+  final Map<String, String> roleMap = {'customer': 'R001', 'rider': 'R002'};
 
   // Only @gmail.com addresses are accepted for sign up.
   static final RegExp _emailRegex = RegExp(
@@ -105,6 +103,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
     if (!RegExp(r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\/~`]').hasMatch(v)) {
       return 'Add at least 1 special character';
     }
+    return null;
+  }
+
+  String? _validateConfirmPassword(String? value) {
+    final v = value ?? '';
+    if (v.isEmpty) return 'Confirm your password';
+    if (v != _passwordController.text) return 'Passwords do not match';
     return null;
   }
 
@@ -259,6 +264,22 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await credential.user!.sendEmailVerification();
       await credential.user!.updateDisplayName(_nameController.text.trim());
 
+      // 👈 ADDED: save the customer's profile in Firestore (users/{uid}).
+      // Before this, only the Auth profile got the name, and Firestore
+      // ended up with just fcmToken + emailVerified, so name/email/roleId
+      // were missing. merge:true keeps the FCM token write (and the
+      // emailVerified update done at login) from overwriting each other.
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(credential.user!.uid)
+          .set({
+            'name': _nameController.text.trim(),
+            'email': credential.user!.email ?? _emailController.text.trim(),
+            'roleId': roleMap[widget.role],
+            'createdAt': FieldValue.serverTimestamp(),
+            'emailVerified': false,
+          }, SetOptions(merge: true));
+
       if (guestUid != null) {
         await _migrateGuestCart(guestUid, credential.user!.uid);
       }
@@ -375,6 +396,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -432,26 +454,32 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ),
                         validator: _validatePassword,
                       ),
-                      const SizedBox(height: 6),
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: Text(
-                            'Min 8 characters, with uppercase, lowercase, '
-                            'number & special character',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                            ),
+                      const SizedBox(height: 16),
+                      _buildField(
+                        controller: _confirmPasswordController,
+                        label: 'Confirm Password',
+                        icon: Icons.lock_outline,
+                        obscureText: _obscureConfirmPassword,
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureConfirmPassword
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined,
+                            color: Colors.black45,
+                            size: 20,
+                          ),
+                          onPressed: () => setState(
+                            () => _obscureConfirmPassword =
+                                !_obscureConfirmPassword,
                           ),
                         ),
+                        validator: _validateConfirmPassword,
                       ),
                       const SizedBox(height: 20),
 
                       SizedBox(
-                        width: double.infinity,
-                        height: 54,
+                        width: 220,
+                        height: 50,
                         child: ElevatedButton(
                           onPressed: _isLoading ? null : _signUp,
                           style: ElevatedButton.styleFrom(
@@ -630,8 +658,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   Widget _buildGoogleButton({required String label, VoidCallback? onTap}) {
     return SizedBox(
-      width: double.infinity,
-      height: 52,
+      width: 220,
+      height: 48,
       child: OutlinedButton.icon(
         onPressed: onTap,
         style: OutlinedButton.styleFrom(
@@ -651,7 +679,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
           style: const TextStyle(
             color: Colors.black87,
             fontWeight: FontWeight.w600,
-            fontSize: 14,
+            fontSize: 13,
           ),
         ),
       ),
@@ -668,50 +696,42 @@ class _SignUpScreenState extends State<SignUpScreen> {
     String? Function(String?)? validator,
     bool capitalizeWords = false,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      textCapitalization: capitalizeWords
+          ? TextCapitalization.words
+          : TextCapitalization.none,
+      inputFormatters: capitalizeWords ? [CapitalizeWordsFormatter()] : null,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+        color: Colors.black87,
       ),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        obscureText: obscureText,
-        textCapitalization: capitalizeWords
-            ? TextCapitalization.words
-            : TextCapitalization.none,
-        inputFormatters: capitalizeWords ? [CapitalizeWordsFormatter()] : null,
-        style: const TextStyle(
-          fontWeight: FontWeight.w500,
-          color: Colors.black87,
+      validator: validator,
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: fieldColor,
+        prefixIcon: Icon(icon, color: themeColor, size: 20),
+        suffixIcon: suffixIcon,
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 12,
         ),
-        validator: validator,
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: fieldColor,
-          prefixIcon: Icon(icon, color: themeColor, size: 20),
-          suffixIcon: suffixIcon,
-          labelText: label,
-          labelStyle: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-          contentPadding: const EdgeInsets.symmetric(vertical: 16),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.black26, width: 1.0),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: Colors.black26, width: 1.0),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: const BorderSide(color: themeColor, width: 1.6),
-          ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.black38),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.black38),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: themeColor, width: 1.6),
         ),
       ),
     );

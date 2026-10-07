@@ -21,16 +21,11 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  
-  static const primary = Color(0xFFFF8A00); 
-  static const maroon = Color(0xFFA70000); 
-  static const bgColor = Colors.white; 
-  static const itemCardColor = Color(
-    0xFFFFFDFA,
-  );
-  static const lightMaroonBorder = Color(
-    0x33A70000,
-  ); 
+  static const primary = Color(0xFFFF8A00);
+  static const maroon = Color(0xFFA70000);
+  static const bgColor = Colors.white;
+  static const itemCardColor = Color(0xFFFFFDFA);
+  static const lightMaroonBorder = Color(0x33A70000);
 
   int selectedCategoryIndex = 0;
   List<FoodItem> allItems = [];
@@ -53,8 +48,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String get _currentUserId =>
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
-  final List<String> categories = [
-    "ALL",
+  // Master list: only fixes the ORDER and display NAMES of the tabs.
+  // A tab is shown only when the selected branch has at least one item in
+  // that category (see _buildVisibleCategories). "ALL" and "SMART COMBO"
+  // are always shown. Categories found in the menu that are not listed
+  // here are added automatically as extra tabs.
+  static const List<String> _baseCategories = [
     "PIZZA",
     "BURGER",
     "WINGS",
@@ -64,8 +63,10 @@ class _HomeScreenState extends State<HomeScreen> {
     "PARATHA ROLL",
     "DEALS",
     "COMBO",
-    "SMART COMBO",
   ];
+
+  // Tabs actually shown. Rebuilt every time the menu is fetched.
+  List<String> categories = ["ALL", "SMART COMBO"];
 
   @override
   void initState() {
@@ -197,6 +198,33 @@ class _HomeScreenState extends State<HomeScreen> {
     return false;
   }
 
+  // Builds the category tabs from the items that really exist, so a
+  // category with no items (e.g. PIZZA) is hidden automatically.
+  List<String> _buildVisibleCategories(List<FoodItem> items) {
+    final visible = <String>['ALL'];
+
+    for (final base in _baseCategories) {
+      if (items.any((i) => _categoryMatches(i.category, base))) {
+        visible.add(base);
+      }
+    }
+
+    // Categories present in the menu but missing from _baseCategories.
+    final extraKeys = <String>{};
+    for (final item in items) {
+      final raw = item.category.trim();
+      final key = _normalizeCategory(raw);
+      if (key.isEmpty) continue;
+      final isKnown = _baseCategories.any((b) => _categoryMatches(raw, b));
+      if (!isKnown && extraKeys.add(key)) {
+        visible.add(raw.toUpperCase());
+      }
+    }
+
+    visible.add('SMART COMBO');
+    return visible;
+  }
+
   void _listenForUserName() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -307,6 +335,16 @@ class _HomeScreenState extends State<HomeScreen> {
           if (b.createdAt == null) return -1;
           return b.createdAt!.compareTo(a.createdAt!);
         });
+
+        // Rebuild tabs from the fetched items; keep the current tab if it
+        // still exists, otherwise fall back to ALL.
+        final previouslySelected = selectedCategoryIndex < categories.length
+            ? categories[selectedCategoryIndex]
+            : 'ALL';
+        categories = _buildVisibleCategories(allItems);
+        final newIndex = categories.indexOf(previouslySelected);
+        selectedCategoryIndex = newIndex == -1 ? 0 : newIndex;
+
         isLoadingItems = false;
       });
     } catch (e) {
@@ -362,6 +400,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Pull-down to refresh: reloads the menu of the selected branch.
+  Future<void> _refreshMenu() async {
+    final branchId = selectedBranchId;
+    if (branchId == null) return;
+    await _fetchMenuItems(branchId);
+  }
+
   @override
   Widget build(BuildContext context) {
     List<FoodItem> displayItems;
@@ -386,66 +431,74 @@ class _HomeScreenState extends State<HomeScreen> {
       body: isLoadingBranches
           ? const Center(child: CircularProgressIndicator(color: primary))
           : SafeArea(
-              child: CustomScrollView(
-                physics: const BouncingScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(child: _buildHeader(safeDropdownValue)),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                      child: _buildSearchBar(),
-                    ),
+              child: RefreshIndicator(
+                color: primary,
+                onRefresh: _refreshMenu,
+                child: CustomScrollView(
+                  // AlwaysScrollable: pull-to-refresh works even when the
+                  // content is shorter than the screen.
+                  physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics(),
                   ),
-                  SliverToBoxAdapter(child: _buildCategories()),
-                  if (!isSearching)
+                  slivers: [
+                    SliverToBoxAdapter(child: _buildHeader(safeDropdownValue)),
                     SliverToBoxAdapter(
                       child: Padding(
-                        padding: const EdgeInsets.only(top: 20),
-                        child: OfferSlider(branchId: selectedBranchId ?? ''),
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: _buildSearchBar(),
                       ),
                     ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
-                      child: _sectionTitle(
-                        isSearching
-                            ? 'Results for "${_searchController.text}"'
-                            : selectedCategoryIndex == 0
-                            ? 'Our Menu'
-                            : categories[selectedCategoryIndex],
-                      ),
-                    ),
-                  ),
-                  if (isLoadingItems)
-                    const SliverToBoxAdapter(
-                      child: Center(
+                    SliverToBoxAdapter(child: _buildCategories()),
+                    if (!isSearching)
+                      SliverToBoxAdapter(
                         child: Padding(
-                          padding: EdgeInsets.all(40),
-                          child: CircularProgressIndicator(color: primary),
+                          padding: const EdgeInsets.only(top: 20),
+                          child: OfferSlider(branchId: selectedBranchId ?? ''),
                         ),
                       ),
-                    )
-                  else if (displayItems.isEmpty)
-                    SliverToBoxAdapter(child: _buildEmptyState())
-                  else
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                      sliver: SliverGrid(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) =>
-                              _buildFoodCard(displayItems[index]),
-                          childCount: displayItems.length,
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
+                        child: _sectionTitle(
+                          isSearching
+                              ? 'Results for "${_searchController.text}"'
+                              : selectedCategoryIndex == 0
+                              ? 'Our Menu'
+                              : categories[selectedCategoryIndex],
                         ),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: 2,
-                              childAspectRatio: 0.78,
-                              crossAxisSpacing: 12,
-                              mainAxisSpacing: 12,
-                            ),
                       ),
                     ),
-                ],
+                    if (isLoadingItems)
+                      const SliverToBoxAdapter(
+                        child: Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(40),
+                            child: CircularProgressIndicator(color: primary),
+                          ),
+                        ),
+                      )
+                    else if (displayItems.isEmpty)
+                      SliverToBoxAdapter(child: _buildEmptyState())
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                        sliver: SliverGrid(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) =>
+                                _buildFoodCard(displayItems[index]),
+                            childCount: displayItems.length,
+                          ),
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                childAspectRatio: 0.78,
+                                crossAxisSpacing: 12,
+                                mainAxisSpacing: 12,
+                              ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
     );

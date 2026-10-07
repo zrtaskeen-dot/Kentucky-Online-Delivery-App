@@ -24,33 +24,29 @@ class OnboardPage3 extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Small brand mark instead of a plain heading — gives the
-                // screen an anchor point before the welcome text.
                 Container(
-                  width: 64,
-                  height: 64,
+                  width: 80,
+                  height: 80,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [primary, maroonDark],
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: primary.withValues(alpha: 0.25),
-                        blurRadius: 20,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: primary.withValues(alpha: 0.4), width: 2),
                   ),
-                  child: const Icon(
-                    Icons.restaurant_menu_rounded,
-                    color: Colors.white,
-                    size: 30,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(
+                      22,
+                    ), // border se thoda chhota
+                    child: Image.asset(
+                      'assets/kentucky_logo.png',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.restaurant_menu_rounded,
+                        color: primary,
+                        size: 48,
+                      ),
+                    ),
                   ),
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 24),
 
                 Text(
                   "Welcome to Kentucky",

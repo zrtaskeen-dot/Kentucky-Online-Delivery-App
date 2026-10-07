@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -18,6 +20,58 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   static const bgColor = Colors.white;
 
   GoogleMapController? _mapController;
+
+  // Custom blue "dot" used for the rider's live location. A Marker icon keeps
+  // the same pixel size at every zoom level, so the rider never disappears
+  // when the map zooms out (a meters-based Circle alone would).
+  BitmapDescriptor? _riderDotIcon;
+
+  // The camera is fitted to "rider + delivery address" only ONCE. After that
+  // the rider dot just moves, so the customer can zoom/pan freely without the
+  // map snapping back on every location update. The recenter button re-fits.
+  bool _initialFitDone = false;
+  LatLng? _lastRiderLatLng;
+  LatLng? _lastDestLatLng;
+
+  @override
+  void initState() {
+    super.initState();
+    _createRiderDotIcon();
+  }
+
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _createRiderDotIcon() async {
+    const double size = 64;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    const center = Offset(size / 2, size / 2);
+
+    // Soft outer halo
+    canvas.drawCircle(
+      center,
+      size / 2,
+      Paint()..color = Colors.blue.withValues(alpha: 0.25),
+    );
+    // White ring
+    canvas.drawCircle(center, size / 3.2, Paint()..color = Colors.white);
+    // Solid blue dot
+    canvas.drawCircle(center, size / 4, Paint()..color = Colors.blue);
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+
+    if (mounted && bytes != null) {
+      setState(() {
+        _riderDotIcon = BitmapDescriptor.fromBytes(bytes.buffer.asUint8List());
+      });
+    }
+  }
 
   Future<void> _callRider(BuildContext context, String? phone) async {
     if (phone == null || phone.trim().isEmpty) {
@@ -43,8 +97,28 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     }
   }
 
-  void _fitTwoPinsOnScreen(LatLng riderLatLng, LatLng destLatLng) {
-    if (_mapController == null) return;
+  // If the rider moves out of the visible part of the map, pan the camera so
+  // the customer keeps seeing the rider (without resetting their zoom).
+  Future<void> _keepRiderInView(LatLng rider) async {
+    final controller = _mapController;
+    if (controller == null) return;
+    try {
+      final region = await controller.getVisibleRegion();
+      if (!region.contains(rider)) {
+        controller.animateCamera(CameraUpdate.newLatLng(rider));
+      }
+    } catch (_) {}
+  }
+
+  void _fitTwoPinsOnScreen(LatLng riderLatLng, LatLng? destLatLng) {
+    final controller = _mapController;
+    if (controller == null) return;
+
+    // Only the rider is known (or both are at the same spot): just center.
+    if (destLatLng == null || destLatLng == riderLatLng) {
+      controller.animateCamera(CameraUpdate.newLatLngZoom(riderLatLng, 16));
+      return;
+    }
 
     final double minLat = riderLatLng.latitude < destLatLng.latitude
         ? riderLatLng.latitude
@@ -64,7 +138,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       northeast: LatLng(maxLat, maxLng),
     );
 
-    _mapController!.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
+    controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 80));
   }
 
   @override
@@ -105,10 +179,17 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           }
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
-          final status = data['order_status'] ?? 'Accepted';
 
+          // The rider app writes "orderStatus" (camelCase); the old
+          // "order_status" is only kept as a fallback for very old orders.
+          final String status =
+              (data['orderStatus'] ?? data['order_status'] ?? 'Accepted')
+                  .toString();
+
+          // Rider live location (written by the rider app).
           final double? riderLat = (data['riderLat'] as num?)?.toDouble();
           final double? riderLng = (data['riderLng'] as num?)?.toDouble();
+          // Customer's delivery address location (saved when the order was placed).
           final double? destLat = (data['latitude'] as num?)?.toDouble();
           final double? destLng = (data['longitude'] as num?)?.toDouble();
 
@@ -119,7 +200,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           final bool hasRiderLocation = riderLat != null && riderLng != null;
           final bool hasDestination = destLat != null && destLng != null;
 
-          if (status == 'Delivered') {
+          if (status.toLowerCase() == 'delivered') {
             return _buildDeliveredView(context, riderName);
           }
 
@@ -128,52 +209,107 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           }
 
           final riderLatLng = LatLng(riderLat, riderLng);
-          final destLatLng = hasDestination ? LatLng(destLat, destLng) : null;
+          final LatLng? destLatLng = hasDestination
+              ? LatLng(destLat, destLng)
+              : null;
 
-          if (destLatLng != null) {
+          _lastRiderLatLng = riderLatLng;
+          _lastDestLatLng = destLatLng;
+
+          // Fit the camera the first time only (map may not exist yet on the
+          // very first build - onMapCreated handles that case).
+          if (!_initialFitDone && _mapController != null) {
+            _initialFitDone = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               _fitTwoPinsOnScreen(riderLatLng, destLatLng);
+            });
+          } else if (_initialFitDone) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _keepRiderInView(riderLatLng);
             });
           }
 
           return Column(
             children: [
               Expanded(
-                child: GoogleMap(
-                  initialCameraPosition: CameraPosition(
-                    target: LatLng(
-                      (riderLat + (destLat ?? riderLat)) / 2,
-                      (riderLng + (destLng ?? riderLng)) / 2,
-                    ),
-                    zoom: 10,
-                  ),
-                  onMapCreated: (controller) {
-                    _mapController = controller;
-                    if (destLatLng != null) {
-                      _fitTwoPinsOnScreen(riderLatLng, destLatLng);
-                    }
-                  },
-                  myLocationButtonEnabled: false,
-                  zoomControlsEnabled: true,
-                  markers: {
-                    Marker(
-                      markerId: const MarkerId('rider'),
-                      position: riderLatLng,
-                      icon: BitmapDescriptor.defaultMarkerWithHue(
-                        BitmapDescriptor.hueOrange,
-                      ),
-                      infoWindow: InfoWindow(title: 'Rider: $riderName'),
-                    ),
-                    if (destLatLng != null)
-                      Marker(
-                        markerId: const MarkerId('destination'),
-                        position: destLatLng,
-                        icon: BitmapDescriptor.defaultMarkerWithHue(
-                          BitmapDescriptor.hueRed,
+                child: Stack(
+                  children: [
+                    GoogleMap(
+                      initialCameraPosition: CameraPosition(
+                        target: LatLng(
+                          (riderLat + (destLat ?? riderLat)) / 2,
+                          (riderLng + (destLng ?? riderLng)) / 2,
                         ),
-                        infoWindow: const InfoWindow(title: 'Delivery Address'),
+                        zoom: 14,
                       ),
-                  },
+                      onMapCreated: (controller) {
+                        _mapController = controller;
+                        if (!_initialFitDone) {
+                          _initialFitDone = true;
+                          _fitTwoPinsOnScreen(riderLatLng, destLatLng);
+                        }
+                      },
+                      myLocationButtonEnabled: false,
+                      zoomControlsEnabled: false,
+                      // Rider = circle (blue dot with a soft halo) that moves live.
+                      circles: {
+                        Circle(
+                          circleId: const CircleId('rider_halo'),
+                          center: riderLatLng,
+                          radius: 40,
+                          fillColor: Colors.blue.withValues(alpha: 0.15),
+                          strokeColor: Colors.blue.withValues(alpha: 0.4),
+                          strokeWidth: 1,
+                        ),
+                      },
+                      markers: {
+                        // Rider dot: always visible at any zoom level.
+                        Marker(
+                          markerId: const MarkerId('rider'),
+                          position: riderLatLng,
+                          icon:
+                              _riderDotIcon ??
+                              BitmapDescriptor.defaultMarkerWithHue(
+                                BitmapDescriptor.hueAzure,
+                              ),
+                          anchor: const Offset(0.5, 0.5),
+                          flat: true,
+                          infoWindow: InfoWindow(title: 'Rider: $riderName'),
+                        ),
+                        // Customer = red pin at the delivery address.
+                        if (destLatLng != null)
+                          Marker(
+                            markerId: const MarkerId('destination'),
+                            position: destLatLng,
+                            icon: BitmapDescriptor.defaultMarkerWithHue(
+                              BitmapDescriptor.hueRed,
+                            ),
+                            infoWindow: const InfoWindow(
+                              title: 'Delivery Address',
+                            ),
+                          ),
+                      },
+                    ),
+                    // Re-fit button: shows both rider and delivery address again.
+                    Positioned(
+                      right: 12,
+                      bottom: 12,
+                      child: FloatingActionButton.small(
+                        heroTag: 'recenter_tracking',
+                        backgroundColor: Colors.white,
+                        onPressed: () {
+                          final r = _lastRiderLatLng;
+                          if (r != null) {
+                            _fitTwoPinsOnScreen(r, _lastDestLatLng);
+                          }
+                        },
+                        child: const Icon(
+                          Icons.center_focus_strong_rounded,
+                          color: primary,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
@@ -325,7 +461,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               const Text(
                 'Live tracking will start here automatically once the rider turns on GPS.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: Colors.black54, height: 1.4),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.black54,
+                  height: 1.4,
+                ),
               ),
             ],
           ),
@@ -402,6 +542,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       case 'Picked Up':
         return Colors.blue.shade700;
       case 'On The Way':
+      case 'On the Way':
         return Colors.orange.shade700;
       case 'Delivered':
         return Colors.green.shade700;

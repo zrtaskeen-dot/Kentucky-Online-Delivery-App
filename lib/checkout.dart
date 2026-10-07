@@ -76,21 +76,7 @@ class CheckoutScreen extends StatefulWidget {
 }
 
 class _CheckoutLocationScreenState extends State<CheckoutScreen> {
-  // Replace with your real key, ideally loaded from --dart-define rather
-  // than hardcoded here.
-  //
-  // IMPORTANT: this key is used for raw REST calls (Places Autocomplete,
-  // Place Details, Geocoding) below via http.get — NOT through the native
-  // Maps SDK. If this key has an "Android apps" or "iOS apps" application
-  // restriction in Google Cloud Console, these REST calls will silently
-  // get REQUEST_DENIED: that restriction only works for requests made by
-  // the native SDK (which attaches special headers), not for a plain
-  // http.get from Dart. Either use a separate key with no app restriction
-  // (or restrict it by API instead) for these calls, or keep this one
-  // restriction-free, and make sure Places API + Geocoding API are both
-  // enabled for it — see _decodeGoogleResponse below, which now logs the
-  // real reason whenever Google rejects a request.
-  static const String _googleApiKey = 'AIzaSyDDTpx9ZaDEsDzGIOnrsWLQL3vHKz7DZU4';
+  static const String _googleApiKey = String.fromEnvironment('GOOGLE_API_KEY');
 
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl = TextEditingController();
@@ -98,8 +84,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   final _addressCtrl = TextEditingController();
   final _addressFocus = FocusNode();
 
-  // Search bar that sits on top of the map. Fully separate from
-  // _addressCtrl — this is the only place suggestions/loading show up.
   final _searchCtrl = TextEditingController();
   final _searchFocus = FocusNode();
   List<_PlaceSuggestion> _suggestions = [];
@@ -107,10 +91,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   Timer? _debounce;
   String _sessionToken = '';
 
-  // Debounce + re-entrancy guard for the Address field: typing in it
-  // should move the map, but setting its text programmatically (after a
-  // map tap, search selection, or GPS fetch) must NOT re-trigger another
-  // geocode of the text we just wrote there ourselves.
   Timer? _addressDebounce;
   bool _updatingAddressProgrammatically = false;
 
@@ -125,31 +105,298 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   bool _fetchingCurrentLocation = false;
   bool _isInZone = true;
 
-  static const LatLng _zoneSouthWest = LatLng(33.7377237, 72.7183126);
-  static const LatLng _zoneNorthEast = LatLng(33.8020805, 72.79845700000001);
+  bool _zoneUnverified = false; // true jab Google se distance nahi mili
+  int _zoneCheckSeq = 0; // purane (stale) check ka result ignore karne ke liye
+  final Map<String, double> _roadDistCache = {};
+
+  // Radius ke upar itne extra metres allow hain (GPS jitter absorb karne ke
+  // liye). 0 = bilkul strict.
+  static const double _zoneToleranceM = 0;
+
+  // Delivery zone — sirf SELECTED BRANCH ka apna (restaurant_info/{branchId}).
+  // Priority:
+  //   1. deliveryBounds {south, north, west, east}  (admin ne set kiya)
+  //   2. branchLat / branchLng + deliveryRadiusKm    (circle)
+  //   3. branch ka 'address' yahin geocode karke circle
+  // Kuch bhi na mile to zone "not configured" hai aur address qabool nahi
+  // hota. Kisi aur branch ka (jaise Wah ka) zone kabhi fallback nahi banta.
+  //
+  // Circle ka radius ab ROAD (driving) distance hai, straight-line nahi.
+  static const double _defaultRadiusKm = 5;
+  LatLng? _zoneSouthWest;
+  LatLng? _zoneNorthEast;
+  LatLng? _zoneCircleCenter;
+  double? _zoneCircleRadiusM;
+  bool _zoneReady = false; // branch zone load karne ki koshish mukammal
+  bool _zoneConfigured = false;
+  String _branchLabel = '';
 
   static const bgColor = Colors.white;
   static const primary = Color(0xFFA70000);
   static const creamText = Colors.white;
   static const fieldBg = Color(0xFFFFFDFA);
 
-  bool _isWithinDeliveryZone(LatLng point) {
-    return point.latitude >= _zoneSouthWest.latitude &&
-        point.latitude <= _zoneNorthEast.latitude &&
-        point.longitude >= _zoneSouthWest.longitude &&
-        point.longitude <= _zoneNorthEast.longitude;
+  // Returns true (in zone), false (outside), or null (road distance could
+  // not be verified — e.g. no internet / API error).
+  Future<bool?> _evaluateZone(LatLng point) async {
+    // Jab tak branch ka zone load ho raha hai, rukawat na lagao.
+    if (!_zoneReady) return true;
+    if (!_zoneConfigured) return false;
+
+    final sw = _zoneSouthWest;
+    final ne = _zoneNorthEast;
+    if (sw != null && ne != null) {
+      if (point.latitude < sw.latitude ||
+          point.latitude > ne.latitude ||
+          point.longitude < sw.longitude ||
+          point.longitude > ne.longitude) {
+        return false;
+      }
+    }
+
+    final c = _zoneCircleCenter;
+    final r = _zoneCircleRadiusM;
+    if (c != null && r != null) {
+      final limit = r + _zoneToleranceM;
+
+      // Road kabhi straight line se chhoti nahi hoti. Agar straight line
+      // hi limit se zyada hai to API call ki zaroorat nahi — seedha outside.
+      if (_distanceMeters(c, point) > limit) return false;
+
+      final road = await _roadDistanceMeters(c, point);
+      if (road == null) return null;
+      return road <= limit;
+    }
+    return true;
   }
 
-  static final LatLng _zoneCenter = LatLng(
-    (_zoneSouthWest.latitude + _zoneNorthEast.latitude) / 2,
-    (_zoneSouthWest.longitude + _zoneNorthEast.longitude) / 2,
-  );
+  // Branch se customer tak driving distance (metres), Routes API
+  // (computeRouteMatrix) ke zariye — legacy Distance Matrix ab naye
+  // projects par enable nahi ho sakta.
+  // double.infinity = koi route nahi, null = verify nahi ho saka.
+  Future<double?> _roadDistanceMeters(LatLng from, LatLng to) async {
+    final key =
+        '${from.latitude.toStringAsFixed(5)},'
+        '${from.longitude.toStringAsFixed(5)}|'
+        '${to.latitude.toStringAsFixed(5)},'
+        '${to.longitude.toStringAsFixed(5)}';
+    final cached = _roadDistCache[key];
+    if (cached != null) return cached;
 
-  static final double _zoneRadiusMeters = _distanceMeters(
-    _zoneCenter,
-    _zoneNorthEast,
-  );
+    try {
+      final uri = Uri.https(
+        'routes.googleapis.com',
+        '/distanceMatrix/v2:computeRouteMatrix',
+      );
 
+      final response = await http.post(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': _googleApiKey,
+          'X-Goog-FieldMask':
+              'originIndex,destinationIndex,distanceMeters,status,condition',
+        },
+        body: jsonEncode({
+          'origins': [
+            {
+              'waypoint': {
+                'location': {
+                  'latLng': {
+                    'latitude': from.latitude, // branch
+                    'longitude': from.longitude,
+                  },
+                },
+              },
+            },
+          ],
+          'destinations': [
+            {
+              'waypoint': {
+                'location': {
+                  'latLng': {
+                    'latitude': to.latitude, // customer
+                    'longitude': to.longitude,
+                  },
+                },
+              },
+            },
+          ],
+          'travelMode': 'DRIVE',
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint(
+          'Routes API error ${response.statusCode}: ${response.body}. '
+          'Check that Routes API is enabled for the key and that the key '
+          'has no Android/iOS/HTTP-referrer restriction.',
+        );
+        return null;
+      }
+
+      final decoded = jsonDecode(response.body);
+      final list = decoded is List ? decoded : [decoded];
+      if (list.isEmpty) return null;
+
+      final el = list.first as Map<String, dynamic>;
+      final condition = el['condition'] as String?;
+      if (condition == 'ROUTE_NOT_FOUND') return double.infinity;
+      if (condition != 'ROUTE_EXISTS') return null;
+
+      final meters = (el['distanceMeters'] as num?)?.toDouble();
+      if (meters == null) return null;
+      _roadDistCache[key] = meters;
+      return meters;
+    } catch (e) {
+      debugPrint('Road distance lookup failed: $e');
+      return null;
+    }
+  }
+
+  LatLng get _zoneCenter {
+    final c = _zoneCircleCenter;
+    if (c != null) return c;
+    final sw = _zoneSouthWest;
+    final ne = _zoneNorthEast;
+    if (sw != null && ne != null) {
+      return LatLng(
+        (sw.latitude + ne.latitude) / 2,
+        (sw.longitude + ne.longitude) / 2,
+      );
+    }
+    return const LatLng(0, 0);
+  }
+
+  double get _zoneRadiusMeters {
+    final r = _zoneCircleRadiusM;
+    if (r != null) return r;
+    final ne = _zoneNorthEast;
+    if (ne != null) return _distanceMeters(_zoneCenter, ne);
+    return 0;
+  }
+
+  // Geocoding "bounds" bias ke liye box (circle ho to uske gird ka box).
+  LatLng get _biasSouthWest {
+    final sw = _zoneSouthWest;
+    if (sw != null) return sw;
+    final c = _zoneCenter;
+    final dLat = _zoneRadiusMeters / 110574.0;
+    final dLng =
+        _zoneRadiusMeters / (111320.0 * math.cos(c.latitude * math.pi / 180));
+    return LatLng(c.latitude - dLat, c.longitude - dLng);
+  }
+
+  LatLng get _biasNorthEast {
+    final ne = _zoneNorthEast;
+    if (ne != null) return ne;
+    final c = _zoneCenter;
+    final dLat = _zoneRadiusMeters / 110574.0;
+    final dLng =
+        _zoneRadiusMeters / (111320.0 * math.cos(c.latitude * math.pi / 180));
+    return LatLng(c.latitude + dLat, c.longitude + dLng);
+  }
+
+  String get _zoneMessage {
+    if (_zoneReady && !_zoneConfigured) {
+      return 'Delivery area for this branch is not set yet.';
+    }
+    return _branchLabel.isEmpty
+        ? 'Outside our delivery area.'
+        : 'Outside $_branchLabel delivery area.';
+  }
+
+  double? _toNum(dynamic v) =>
+      v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '');
+
+  // Selected branch ka delivery zone Firestore se (ya uske address se) banata hai.
+  Future<void> _loadBranchZone() async {
+    LatLng? sw, ne, center;
+    double? radiusM;
+    String label = '';
+
+    try {
+      if (widget.branchId.isNotEmpty) {
+        final doc = await FirebaseFirestore.instance
+            .collection('restaurant_info')
+            .doc(widget.branchId)
+            .get();
+        final data = doc.data() ?? {};
+        label = (data['branchName'] ?? '').toString().trim();
+
+        // 1) Admin ka box
+        final b = data['deliveryBounds'];
+        if (b is Map) {
+          final south = _toNum(b['south']);
+          final north = _toNum(b['north']);
+          final west = _toNum(b['west']);
+          final east = _toNum(b['east']);
+          if (south != null &&
+              north != null &&
+              west != null &&
+              east != null &&
+              south < north &&
+              west < east) {
+            sw = LatLng(south, west);
+            ne = LatLng(north, east);
+          }
+        }
+
+        // 2) Branch ki location + radius (circle box se zyada sahi hai)
+        final radiusKm = _toNum(data['deliveryRadiusKm']);
+        final km = (radiusKm != null && radiusKm > 0)
+            ? radiusKm
+            : _defaultRadiusKm;
+        final lat = _toNum(data['branchLat']);
+        final lng = _toNum(data['branchLng']);
+        if (lat != null && lng != null) {
+          center = LatLng(lat, lng);
+          radiusM = km * 1000;
+          // Circle hi asal zone hai; admin tool ka purana saved box (jo
+          // kisi purane radius se bana tha) radius badalne par rukawat na bane.
+          sw = null;
+          ne = null;
+        } else if (sw == null) {
+          // 3) Na box, na location: branch ka address yahin geocode karo
+          final address = (data['address'] ?? '').toString().trim();
+          if (address.isNotEmpty) {
+            final uri = Uri.https(
+              'maps.googleapis.com',
+              '/maps/api/geocode/json',
+              {'address': address, 'key': _googleApiKey},
+            );
+            final res = _decodeGoogleResponse(await http.get(uri));
+            final results = (res['results'] as List?) ?? [];
+            if (results.isNotEmpty) {
+              final loc = results.first['geometry']['location'] as Map;
+              center = LatLng(
+                (loc['lat'] as num).toDouble(),
+                (loc['lng'] as num).toDouble(),
+              );
+              radiusM = km * 1000;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Could not load branch delivery zone: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _zoneSouthWest = sw;
+      _zoneNorthEast = ne;
+      _zoneCircleCenter = center;
+      _zoneCircleRadiusM = radiusM;
+      _branchLabel = label;
+      _zoneConfigured = sw != null || center != null;
+      _zoneReady = true;
+    });
+    _checkZone();
+  }
+
+  // Straight-line (haversine) distance — ab sirf pre-check aur autocomplete
+  // bias ke liye use hota hai. Final zone decision road distance se hota hai.
   static double _distanceMeters(LatLng a, LatLng b) {
     const earthRadius = 6371000.0;
     final dLat = (b.latitude - a.latitude) * math.pi / 180;
@@ -165,11 +412,18 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return earthRadius * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
   }
 
-  void _checkZone() {
-    final withinZone = _isWithinDeliveryZone(_pinLatLng);
-    if (withinZone != _isInZone) {
-      setState(() => _isInZone = withinZone);
-    }
+  // Pin ki current position ko check karta hai. Har path (GPS, search, map
+  // tap, typed address) yahi function call karta hai.
+  Future<void> _checkZone() async {
+    final seq = ++_zoneCheckSeq;
+    final point = _pinLatLng;
+    final result = await _evaluateZone(point);
+    // Agar is dauran pin dobara hila ya screen band hui, to ye result purana hai.
+    if (!mounted || seq != _zoneCheckSeq) return;
+    setState(() {
+      _zoneUnverified = result == null;
+      _isInZone = result ?? false;
+    });
   }
 
   String get _uid =>
@@ -186,8 +440,15 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
+    if (_googleApiKey.isEmpty) {
+      debugPrint(
+        'GOOGLE_API_KEY is empty. Run with '
+        '--dart-define=GOOGLE_API_KEY=... (or --dart-define-from-file).',
+      );
+    }
     _newSessionToken();
     _loadSavedInfo();
+    _loadBranchZone();
     _searchCtrl.addListener(_onSearchChanged);
     _addressCtrl.addListener(_onAddressFieldChanged);
   }
@@ -224,8 +485,8 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       debugPrint(
         'Google Maps API error ($status): '
         '${data['error_message'] ?? 'no error_message in response'}. '
-        'Check that Places API and Geocoding API are both enabled for '
-        '_googleApiKey, and that the key has no Android/iOS app '
+        'Check that Places API, Geocoding API and Routes API are '
+        'all enabled for the key, and that the key has no Android/iOS app '
         'restriction (see the comment on _googleApiKey above).',
       );
     }
@@ -259,7 +520,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
 
     final profile = await _fetchProfileDefaults();
-    final profilePhone = (profile?['phone_number'] as String?)?.trim();
+    final profilePhone = (profile?['phone'] as String?)?.trim();
     final profileAddress = (profile?['address'] as String?)?.trim();
     final profileLat = (profile?['lat'] as num?)?.toDouble();
     final profileLng = (profile?['lng'] as num?)?.toDouble();
@@ -279,10 +540,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       setState(() => _phoneCtrl.text = phoneDigits);
     }
 
-    if (lat != null &&
-        lng != null &&
-        address != null &&
-        address.isNotEmpty) {
+    if (lat != null && lng != null && address != null && address.isNotEmpty) {
       setState(() => _pinLatLng = LatLng(lat, lng));
       _setAddressSilently(address);
       _checkZone();
@@ -303,7 +561,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     setState(() => _locationLoading = false);
   }
 
-  // Reads phone_number/address/lat/lng straight from the user's profile
+  // Reads phone/address/lat/lng straight from the user's profile
   // document. Returns null for guests or if the read fails, in which case
   // callers fall back to SharedPreferences / auto-detected location.
   Future<Map<String, dynamic>?> _fetchProfileDefaults() async {
@@ -425,8 +683,8 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         'address': query,
         'key': _googleApiKey,
         'bounds':
-            '${_zoneSouthWest.latitude},${_zoneSouthWest.longitude}|'
-            '${_zoneNorthEast.latitude},${_zoneNorthEast.longitude}',
+            '${_biasSouthWest.latitude},${_biasSouthWest.longitude}|'
+            '${_biasNorthEast.latitude},${_biasNorthEast.longitude}',
       });
 
       final response = await http.get(uri);
@@ -470,6 +728,10 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   // de-duplicated by place_id, establishments listed first so the more
   // precise matches show up before generic road/area results.
   Future<void> _fetchSuggestions(String query) async {
+    if (_zoneReady && !_zoneConfigured) {
+      _snack('Delivery area for this branch is not set yet.');
+      return;
+    }
     setState(() => _searchingSuggestions = true);
     try {
       final baseParams = {
@@ -479,8 +741,10 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         'location': '${_zoneCenter.latitude},${_zoneCenter.longitude}',
         'radius': _zoneRadiusMeters.toStringAsFixed(0),
         // Without this, location+radius are only a *bias* — results
-        // outside the Cantt zone still show up. strictbounds forces
-        // Google to only return results inside that circle.
+        // outside the zone still show up. strictbounds forces Google to
+        // only return results inside that circle. (Circle straight-line
+        // hai, road distance usse kabhi chhoti nahi — isliye ye safe
+        // pre-filter hai; final decision road distance se hota hai.)
         'strictbounds': 'true',
       };
 
@@ -550,6 +814,11 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   // Triggered when the user submits the search bar (presses enter/search)
   // without tapping one of the autocomplete suggestions — a plain
   // forward-geocode of whatever they typed.
+  //
+  // Pehle yahan apna alag zone gate tha jo pin ko move hi nahi hone deta
+  // tha, jabke GPS/map tap pin move karke sirf warning dikhate the. Ab
+  // teeno ek jaisa kaam karte hain: pin move hota hai, phir shared
+  // _checkZone() (road distance) banner dikhata hai.
   Future<void> _searchAndMoveTo(String query) async {
     if (query.trim().isEmpty) return;
     setState(() => _searchingSuggestions = true);
@@ -558,11 +827,11 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         'address': query,
         'key': _googleApiKey,
         // Geocoding API can only "bias" toward this box, it can't hard
-        // restrict like autocomplete's strictbounds can — so we still
-        // check the result against the zone below.
+        // restrict like autocomplete's strictbounds can — the result is
+        // checked against the zone by _checkZone() after the pin moves.
         'bounds':
-            '${_zoneSouthWest.latitude},${_zoneSouthWest.longitude}|'
-            '${_zoneNorthEast.latitude},${_zoneNorthEast.longitude}',
+            '${_biasSouthWest.latitude},${_biasSouthWest.longitude}|'
+            '${_biasNorthEast.latitude},${_biasNorthEast.longitude}',
       });
 
       final response = await http.get(uri);
@@ -581,11 +850,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       final lng = (location['lng'] as num).toDouble();
       final address = _bestFormattedAddress(results) ?? query;
       final point = LatLng(lat, lng);
-
-      if (!_isWithinDeliveryZone(point)) {
-        _snack('That address is outside our delivery zone.');
-        return;
-      }
 
       _movePin(point, address: address);
       _searchCtrl.clear();
@@ -661,6 +925,38 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
+  // Plain reverse-geocoding only returns road/area/city/postal-code-style
+  // components — it has no concept of a shop/landmark "name" (that's why
+  // GPS-detected addresses used to start with a building/plot number or
+  // plus-code-like fragment instead of a name). This does a quick Places
+  // "nearby search" at the pin to find the closest named place, the same
+  // way _selectSuggestion() already gets a name for typed/searched
+  // addresses via Place Details — so GPS-detected and searched addresses
+  // look consistent.
+  Future<String?> _nearestPlaceName(LatLng point) async {
+    try {
+      final uri = Uri.https(
+        'maps.googleapis.com',
+        '/maps/api/place/nearbysearch/json',
+        {
+          'location': '${point.latitude},${point.longitude}',
+          'rankby': 'distance',
+          'key': _googleApiKey,
+        },
+      );
+
+      final response = await http.get(uri);
+      final data = _decodeGoogleResponse(response);
+      final results = (data['results'] as List?) ?? [];
+      if (results.isEmpty) return null;
+      final name = results.first['name'] as String?;
+      return (name != null && name.trim().isNotEmpty) ? name.trim() : null;
+    } catch (e) {
+      debugPrint('Failed to fetch nearby place name: $e');
+      return null;
+    }
+  }
+
   Future<void> _reverseGeocode(LatLng point) async {
     try {
       final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
@@ -680,7 +976,21 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       }
 
       final address = _bestFormattedAddress(results);
-      if (address != null) _setAddressSilently(address);
+      if (address == null) return;
+
+      // FIX: prepend the nearest place's name (e.g. "Aslam Market")
+      // in front of the road/city/postal-code address, same as the
+      // search-suggestion flow — instead of leaving whatever
+      // number/code-like fragment Google's plain geocode put first.
+      final placeName = await _nearestPlaceName(point);
+      final alreadyHasName =
+          placeName != null &&
+          address.toLowerCase().contains(placeName.toLowerCase());
+      final finalAddress = (placeName != null && !alreadyHasName)
+          ? '$placeName, $address'
+          : address;
+
+      _setAddressSilently(finalAddress);
     } catch (e) {
       debugPrint('Failed to reverse geocode location: $e');
     }
@@ -814,12 +1124,26 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       _snack('Please choose your delivery location on the map.');
       return;
     }
-    if (!_isInZone) {
-      _snack('This location is outside our delivery area.');
+    if (!_zoneReady) {
+      _snack('Checking the delivery area — please try again in a moment.');
+      return;
+    }
+
+    // Order se pehle taaza road-distance check — cache ki wajah se agar pin
+    // nahi hila to ye free hai, aur purane (stale) result par order nahi jata.
+    final inZone = await _evaluateZone(_pinLatLng);
+    if (!mounted) return;
+    if (inZone == null) {
+      _snack('Could not verify the delivery distance. Please try again.');
+      return;
+    }
+    if (!inZone) {
+      _snack(_zoneMessage);
       return;
     }
 
     await _persistInfoIfNeeded();
+    if (!mounted) return;
 
     final fullName = '$firstName $lastName';
     final fullPhone = '+92$phoneDigits';
@@ -1121,9 +1445,9 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       width: double.infinity,
       color: Colors.red.shade50,
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: const Text(
-        'This location is outside our delivery zone.',
-        style: TextStyle(
+      child: Text(
+        _zoneMessage,
+        style: const TextStyle(
           fontSize: 12,
           color: Colors.red,
           fontWeight: FontWeight.w600,
@@ -1178,7 +1502,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           Icons.phone_android,
           keyboardType: TextInputType.phone,
           maxLength: 10,
-
           prefixText: '+92 ',
           extraFormatters: [FilteringTextInputFormatter.digitsOnly],
         ),

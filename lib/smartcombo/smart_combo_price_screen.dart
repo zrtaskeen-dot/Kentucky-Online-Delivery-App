@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'smart_combo_categories_screen.dart'; // Agli screen ka import
 import '../cart_screen.dart';
+import '../cart_provider.dart';
 
 class SmartComboPriceScreen extends StatefulWidget {
   final String branchId;
@@ -20,7 +22,6 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
 
   // ── Theme (matches app's maroon/cream palette) ──
   static const Color primaryRed = Color(0xFFA70000);
-  static const Color deepRed = Color(0xFF7A1A00);
   static const Color creamColor = Color(0xFFFFFDFA);
 
   @override
@@ -29,22 +30,19 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
+        // 👈 CHANGED: gradient/deep red hata kar sirf 0xFFA70000 (categories
+        // screen jaisa), texture opacity bhi wohi 0.2.
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [primaryRed, deepRed],
-          ),
+          color: primaryRed,
           image: DecorationImage(
             image: AssetImage("assets/red_texture.png"),
             fit: BoxFit.cover,
-            opacity: 0.15,
+            opacity: 0.2,
           ),
         ),
         child: SafeArea(
-          // 👈 CHANGED: Poori body ab SingleChildScrollView mein wrap hai
-          // taake neeche wala card apni content ke hisaab se size le sake
-          // aur agar content zyada ho to poora page scroll ho jaye.
+          // Poori body SingleChildScrollView mein wrap hai taake neeche wala
+          // card apni content ke hisaab se size le sake aur page scroll ho.
           child: SingleChildScrollView(
             child: Column(
               children: [
@@ -56,10 +54,11 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                     children: [
                       IconButton(
                         onPressed: () => Navigator.pop(context),
+                        // 👈 CHANGED: line wala back arrow
                         icon: const Icon(
-                          Icons.arrow_back_ios_new_rounded,
+                          Icons.arrow_back,
                           color: creamColor,
-                          size: 22,
+                          size: 24,
                         ),
                         style: IconButton.styleFrom(
                           padding: const EdgeInsets.all(10),
@@ -107,9 +106,6 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                 const SizedBox(height: 26),
 
                 // ── Selection Card Box ──
-                // 👈 CHANGED: Expanded hata diya gaya hai. Ab ye Container
-                // apni content (list ki height) ke hisaab se size lega,
-                // poori screen tak forcibly stretch nahi hoga.
                 Container(
                   width: double.infinity,
                   margin: const EdgeInsets.fromLTRB(20, 0, 20, 20),
@@ -118,9 +114,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                     color: creamColor,
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(28),
-                      bottom: Radius.circular(
-                        28,
-                      ), // 👈 poora rounded, kyunke ab full-height nahi
+                      bottom: Radius.circular(28),
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -131,8 +125,7 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                     ],
                   ),
                   child: Column(
-                    mainAxisSize: MainAxisSize
-                        .min, // 👈 CHANGED: content ke hisaab se height
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
@@ -163,9 +156,6 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                       const SizedBox(height: 18),
 
                       // DYNAMIC PRICES FETCHING FROM ALL DEALS/COMBOS
-                      // 👈 CHANGED: Expanded hata diya — StreamBuilder ab
-                      // direct Column ka child hai, apni content jitni
-                      // height lega.
                       StreamBuilder<QuerySnapshot>(
                         stream: FirebaseFirestore.instance
                             .collection('menu')
@@ -269,7 +259,9 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                                             size: 16,
                                             color: isSelected
                                                 ? Colors.white
-                                                : primaryRed.withValues(alpha: 0.55),
+                                                : primaryRed.withValues(
+                                                    alpha: 0.55,
+                                                  ),
                                           ),
                                         ),
                                         if (!isLast)
@@ -332,8 +324,9 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
                                                       ? primaryRed.withValues(
                                                           alpha: 0.28,
                                                         )
-                                                      : Colors.black
-                                                            .withValues(alpha: 0.04),
+                                                      : Colors.black.withValues(
+                                                          alpha: 0.04,
+                                                        ),
                                                   blurRadius: isSelected
                                                       ? 10
                                                       : 5,
@@ -430,13 +423,28 @@ class _SmartComboPriceScreenState extends State<SmartComboPriceScreen> {
   }
 
   Widget _buildCartIconWithBadge(BuildContext context) {
+    // 👈 CHANGED: CartScreen wala hi filter — sirf ACTIVE branch ke items.
+    final String activeBranchId = context
+        .watch<CartProvider>()
+        .selectedBranchId;
+
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('carts')
           .where('userId', isEqualTo: userId)
           .snapshots(),
       builder: (context, snapshot) {
-        int itemCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
+        // Pehle sab docs gine jate the (dusri branch ke bhi), is liye
+        // cart khali hone par bhi "1" dikhta tha. Ab CartScreen jaisa
+        // filter: branchId khali ho ya active branch ke barabar ho.
+        int itemCount = 0;
+        if (snapshot.hasData) {
+          itemCount = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final docBranchId = (data['branchId'] ?? '').toString();
+            return docBranchId.isEmpty || docBranchId == activeBranchId;
+          }).length;
+        }
 
         return Stack(
           clipBehavior: Clip.none,

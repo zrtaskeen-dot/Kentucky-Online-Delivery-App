@@ -90,6 +90,10 @@ class CartScreen extends StatelessWidget {
     final double branchDeliveryCharge = context
         .watch<CartProvider>()
         .deliveryCharge;
+    // Active branch — cart sirf isi branch ke items dikhata hai.
+    final String activeBranchId = context
+        .watch<CartProvider>()
+        .selectedBranchId;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -131,7 +135,22 @@ class CartScreen extends StatelessWidget {
             );
           }
 
-          var cartDocs = snapshot.data!.docs;
+          // Sirf active branch ke items. Purane docs jin mein 'branchId' nahi
+          // hai wo filter se bahar nahi hote (warna cart se ghaib ho jate).
+          var cartDocs = snapshot.data!.docs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final docBranchId = (data['branchId'] ?? '').toString();
+            return docBranchId.isEmpty || docBranchId == activeBranchId;
+          }).toList();
+
+          if (cartDocs.isEmpty) {
+            return const Center(
+              child: Text(
+                "Your cart is empty 🛒",
+                style: TextStyle(fontSize: 18, color: Colors.grey),
+              ),
+            );
+          }
           double calculatedTotalPrice = 0;
           List<CartItem> structuredCartItems = [];
 

@@ -52,7 +52,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final data = doc.exists ? (doc.data() ?? {}) : <String, dynamic>{};
 
       // ── FIXED: order data now only fills in as a FALLBACK ──────────
-      // Pehle ye block phone_number/address ko HAMESHA overwrite kar
+      // Pehle ye block phone/address ko HAMESHA overwrite kar
       // deta tha latest order ki value se, chahe user ne apne profile
       // mein khud value save ki ho. Isi wajah se Profile screen pe
       // edit karne ke baad bhi purani (order wali) value dobara dikh
@@ -91,12 +91,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               (latestOrder['delivery_address'] ?? latestOrder['address'] ?? '')
                   .toString();
 
-          final existingPhone = (data['phone_number'] ?? '').toString();
+          final existingPhone = (data['phone'] ?? '').toString();
           final existingAddress = (data['address'] ?? '').toString();
 
           // Only fall back to order data if user hasn't set their own value.
           if (existingPhone.trim().isEmpty && orderPhone.trim().isNotEmpty) {
-            data['phone_number'] = orderPhone;
+            data['phone'] = orderPhone;
           }
           if (existingAddress.trim().isEmpty &&
               orderAddress.trim().isNotEmpty) {
@@ -193,15 +193,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _editField(String fieldKey, String fieldLabel, String currentValue) {
-    final isPhone = fieldKey == 'phone_number';
+    final isPhone = fieldKey == 'phone';
     final controller = TextEditingController(
       text: isPhone ? _localPhoneDigits(currentValue) : currentValue,
     );
     final iconMap = {
       'name': Icons.person_outline_rounded,
-      'phone_number': Icons.phone_outlined,
+      'phone': Icons.phone_outlined,
       'address': Icons.location_on_outlined,
     };
+
+    // StatefulBuilder ke BAHAR: andar hota to har rebuild par null ho jata
+    // aur "Enter exactly 10 digits" error kabhi nazar nahi aata.
+    String? phoneError;
 
     showGeneralDialog(
       context: context,
@@ -223,7 +227,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         // inline instead of closing the dialog and popping a snackbar.
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
-            String? phoneError;
             return Center(
               child: Material(
                 color: Colors.transparent,
@@ -445,6 +448,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         onTap: () => _editField(fieldKey, label, value),
         child: AbsorbPointer(
           child: TextFormField(
+            // 👈 FIX: a plain TextFormField only reads `initialValue` the
+            // first time it's built — after Save, setState() rebuilds this
+            // widget with a new `value`, but Flutter keeps the OLD text
+            // because it's "the same field" from its point of view. Keying
+            // it by the value forces Flutter to treat it as a fresh field
+            // whenever the value actually changes, so the new text shows
+            // immediately instead of only after a full screen reload.
+            key: ValueKey('$fieldKey:$value'),
             initialValue: value,
             readOnly: true,
             style: const TextStyle(
@@ -532,7 +543,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final name =
         _userData['name'] ?? _userData['fullName'] ?? user?.displayName ?? '';
     final email = _userData['email'] ?? user?.email ?? '';
-    final phone = _userData['phone_number'] ?? user?.phoneNumber ?? '';
+    final phone = _userData['phone'] ?? user?.phoneNumber ?? '';
     final address = _userData['address'] ?? '';
     final photoUrl = _userData['photoUrl'] ?? user?.photoURL;
 
@@ -644,7 +655,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           icon: Icons.phone_outlined,
                           label: 'Phone Number',
                           value: phone,
-                          fieldKey: 'phone_number',
+                          fieldKey: 'phone',
                         ),
                         _buildFieldBox(
                           icon: Icons.location_on_outlined,
@@ -659,7 +670,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: primary,
-                      minimumSize: const Size(double.infinity, 52),
+                      fixedSize: const Size(220, 50),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(30),
                       ),

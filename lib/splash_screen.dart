@@ -130,11 +130,26 @@ class _SplashScreenState extends State<SplashScreen>
             .get();
 
         if (userDoc.exists) {
-          final String role = userDoc.data()?['role'] ?? 'customer';
+          final data = userDoc.data();
+          // The 'role' text field this used to read was removed when
+          // login_screen.dart / signup_screen.dart switched to writing
+          // 'roleId' (an ID like 'R002', looked up against roleMap) as
+          // the source of truth — 'role' is never written anywhere
+          // anymore, so this always read null and fell back to
+          // 'customer'. That's why reopening the app after a rider
+          // login landed on the Customer screen every time, showing the
+          // rider's own name there instead. Same roleId check as
+          // login_screen.dart, with the same legacy 'role' text
+          // fallback for any older accounts that predate roleId.
+          final String roleId = (data?['roleId'] ?? '').toString();
+          final String legacyRole = (data?['role'] ?? '')
+              .toString()
+              .toLowerCase();
+          final bool isRider = roleId == 'R002' || legacyRole == 'rider';
 
           if (!mounted) return;
 
-          if (role == 'rider') {
+          if (isRider) {
             // This user's own users/{uid} document is a rider profile —
             // send them to the Rider dashboard, not the customer shell.
             // (Previously this branch also pushed MainScreen, which is

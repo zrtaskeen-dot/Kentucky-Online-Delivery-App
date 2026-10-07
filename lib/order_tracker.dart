@@ -134,8 +134,8 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
   final TextEditingController _feedbackController = TextEditingController();
   bool _isLoading = false;
 
-  static const Color dialogBgColor = Color(0xFFFCF8DD);
-  static const Color fieldBgColor = Color(0xFFFFFFF0);
+  static const  dialogBgColor = Colors.white;
+  static const Color fieldBgColor = Color(0xFFFFFDFA);
   static const Color maroonColor = Color(0xFF800000);
   static const Color orangeColor = Colors.orange;
 
@@ -143,6 +143,27 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
   void dispose() {
     _feedbackController.dispose();
     super.dispose();
+  }
+
+  // Customer tapped the ✕ instead of rating. We still mark the order as
+  // "handled" (isFeedbackSubmitted: true, with no rating/comment) so
+  // GlobalFeedbackListener's query — which only looks for
+  // isFeedbackSubmitted == false — never picks this order up again. That's
+  // what makes the popup appear exactly once per delivered order, whether
+  // the customer rates it or dismisses it.
+  Future<void> _dismissWithoutRating() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.orderId)
+          .update({'isFeedbackSubmitted': true});
+    } catch (e) {
+      debugPrint('Failed to dismiss feedback prompt: $e');
+    } finally {
+      if (mounted) Navigator.pop(context);
+    }
   }
 
   Future<void> _submitFeedback() async {
@@ -204,16 +225,50 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
       5: 'Excellent',
     };
 
+    // Dialog() already pads itself by the keyboard's height when it opens
+    // (via an internal AnimatedPadding using MediaQuery.viewInsets), but
+    // that only shifts the box up — it doesn't cap how tall the box tries
+    // to be. With no insetPadding set, the default margins plus this
+    // dialog's own content (title, 5 stars, comment field, button) could
+    // end up taller than what's left once the keyboard eats roughly half
+    // the screen, which is what made it look like the popup "disappeared"
+    // the moment the comment field was tapped — it was really being
+    // squeezed/pushed mostly off-screen, not closed. Explicit
+    // insetPadding plus capping the content to the space actually left
+    // below the keyboard keeps it fully visible and scrollable instead.
+    final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final double maxDialogHeight =
+        MediaQuery.of(context).size.height - keyboardHeight - 48;
+
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: dialogBgColor,
       elevation: 8,
-      child: SingleChildScrollView(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: maxDialogHeight > 200 ? maxDialogHeight : 200,
+        ),
+        child: SingleChildScrollView(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Close (✕) — lets the customer skip rating entirely. See
+              // _dismissWithoutRating() for why this still writes to
+              // Firestore instead of just popping the dialog.
+              Align(
+                alignment: Alignment.centerRight,
+                child: IconButton(
+                  onPressed: _isLoading ? null : _dismissWithoutRating,
+                  icon: const Icon(Icons.close_rounded, size: 20),
+                  color: Colors.black45,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Dismiss',
+                ),
+              ),
               const Text(
                 'Order Delivered!',
                 textAlign: TextAlign.center,
@@ -358,6 +413,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

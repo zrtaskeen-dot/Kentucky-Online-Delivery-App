@@ -199,7 +199,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
           .toString();
 
   String get _phone =>
-      (data['phoneNumber'] ?? data['phone_number'] ?? data['phone'] ?? '—')
+      (data['phone'] ?? data['phoneNumber'] ?? data['phone_number'] ?? '—')
           .toString();
 
   String get _address =>
@@ -217,7 +217,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
   // Delivery screen sets this to "Standard Delivery" for immediate
   // orders, and a formatted date/time string for scheduled orders.
-  bool get _isScheduled => _deliveryTime != "Standard Delivery";
+  bool get _isScheduled => _deliveryTime != "As soon as possible";
 
   // Delivery screen sets this to "Cash On Delivery" for COD, and the
   // provider name (EasyPaisa/JazzCash) for online payments.

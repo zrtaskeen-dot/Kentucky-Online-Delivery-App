@@ -7,7 +7,7 @@ import 'page3.dart';
 class OnboardPage1 extends StatelessWidget {
   const OnboardPage1({super.key});
 
-  // Brand palette — maroon + orange, same family as the rest of the app.
+  
   static const primary = Color(0xFFA70000);
   static const accentOrange = Color(0xFFFF8A00);
   static const ink = Color(0xFF2B1010);
@@ -26,7 +26,7 @@ class OnboardPage1 extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Progress bar + Skip
+             
               Row(
                 children: [
                   Expanded(child: _buildOnboardProgressBar(0)),
@@ -113,7 +113,7 @@ class OnboardPage1 extends StatelessWidget {
                       context,
                       MaterialPageRoute(builder: (_) => const OnboardPage2()),
                     );
-                  },
+                  }, 
                   style: ElevatedButton.styleFrom(
                     backgroundColor: accentOrange,
                     foregroundColor: Colors.white,
@@ -121,7 +121,8 @@ class OnboardPage1 extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30),
                     ),
-                  ),
+                              
+                                    ),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -143,10 +144,6 @@ class OnboardPage1 extends StatelessWidget {
   }
 }
 
-// ── Shared onboarding pieces ─────────────────────────────────────────
-// Small helpers reused by page1.dart and page2.dart. Each page keeps its
-// own copy of these free functions (no extra shared file), matching the
-// no-new-file approach already used for the progress dots.
 
 const _onboardPrimary = Color(0xFFA70000);
 const _onboardOrange = Color(0xFFFF8A00);
