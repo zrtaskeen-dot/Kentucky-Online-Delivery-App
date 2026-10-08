@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'cart_provider.dart'; // For CartItem
 import 'main_navigation.dart'; // 👈 CHANGED: HomeScreen ki jagah MainScreen import kiya (bottom nav bar ke liye)
 import 'package:latlong2/latlong.dart';
@@ -45,21 +44,9 @@ class OrderDetailsScreen extends StatelessWidget {
   static const Color errorBorder = Color(0xFFC62828);
   static const Color errorBg = Color(0xFFFDECEA);
   static const Color errorText = Color(0xFFB71C1C);
-
-  // Delivery screen sets deliveryTime to "Standard Delivery" for
-  // immediate orders, and a formatted date/time string for scheduled
-  // ("Deliver Later") orders — so this is not "Standard Delivery" only
-  // when the order is scheduled.
   bool get _isScheduled => deliveryTime != "Standard Delivery";
-
-  // Delivery screen sets paymentMethod to "Cash On Delivery" for COD,
-  // and the provider name (EasyPaisa/JazzCash) for online payments.
   bool get _isOnlinePayment => paymentMethod != "Cash On Delivery";
 
-  // Only "Deliver Later" + Online, with no receipt uploaded yet, is
-  // pending. If the receipt WAS already uploaded at checkout (e.g. the
-  // scheduled time was within the immediate-upload window), the order
-  // shows as placed successfully right away, same as any other order.
   bool get _isPendingReceiptUpload =>
       _isScheduled && _isOnlinePayment && !receiptUploaded;
 
@@ -74,15 +61,11 @@ class OrderDetailsScreen extends StatelessWidget {
   void goBackToMenu(BuildContext context) {
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(
-        builder: (context) => const MainScreen(),
-      ), // 👈 CHANGED: HomeScreen -> MainScreen, taake bottom nav bar wapas aaye
+      MaterialPageRoute(builder: (context) => const MainScreen()),
       (Route<dynamic> route) => false,
     );
   }
 
-  // Same compact, single-line, colored-card snackbar style used on the
-  // Login/Signup screens — green for success, red for error.
   void _showThemedSnack(
     BuildContext context,
     String msg, {
@@ -136,29 +119,6 @@ class OrderDetailsScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.bold, color: bgColor),
         ),
         centerTitle: true,
-        // 👈 Cancel Order now lives inside this menu — off the main
-        // card/view, only shown for scheduled orders.
-        actions: [
-          if (_isScheduled)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert_rounded, color: bgColor),
-              onSelected: (value) {
-                if (value == 'cancel') _cancelOrder(context);
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: 'cancel',
-                  child: Row(
-                    children: [
-                      Icon(Icons.cancel_outlined, size: 18, color: Colors.red),
-                      SizedBox(width: 10),
-                      Text('Cancel Order', style: TextStyle(color: Colors.red)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-        ],
       ),
       body: Column(
         children: [
@@ -168,15 +128,8 @@ class OrderDetailsScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Status section (kept inside the details screen — for
-                  // scheduled orders this is where "Confirmed" shows, not on
-                  // the My Orders card) ──
                   _buildStatusBanner(),
                   const SizedBox(height: 8),
-
-                  // ── Customer / Delivery Details Card (now also holds
-                  // the ordered items below the detail rows, in the same
-                  // card) ──
                   _buildDeliveryDetailsCard(),
                 ],
               ),
@@ -188,11 +141,6 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  // Scheduled orders show "Confirmed" here once the receipt is uploaded
-  // (or immediately for COD, since only online payment needs a receipt).
-  // Non-scheduled ("Deliver Now") orders just show the placed confirmation —
-  // their ongoing Pending/Accepted/Delivered status lives on the My Orders
-  // card, not here.
   Widget _buildStatusBanner() {
     final String label = _isPendingReceiptUpload
         ? "Not Confirmed"
@@ -279,9 +227,6 @@ class OrderDetailsScreen extends StatelessWidget {
           const SizedBox(height: 10),
           _detailRow(Icons.payment_rounded, "Payment Method", paymentMethod),
 
-          // ── Items — shown inside this same card, right below the
-          // delivery details, with no image and tight spacing so the
-          // card doesn't balloon in height. ──
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 10),
             child: Divider(height: 1),
@@ -351,8 +296,6 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  // ── Compact item row: no image, just name/price/qty — used inside
-  // the details card above instead of its own bordered card. ──
   Widget _buildItemRow(CartItem item) {
     return Row(
       children: [
@@ -390,50 +333,6 @@ class OrderDetailsScreen extends StatelessWidget {
     );
   }
 
-  // Cancels a scheduled order. Uses 'orderStatus' — same field HomeScreen
-  // already reads/writes for order state (e.g. 'Delivered').
-  Future<void> _cancelOrder(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Cancel Order?"),
-        content: const Text(
-          "Are you sure you want to cancel this scheduled order?",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("No"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              "Yes, Cancel",
-              style: TextStyle(color: Colors.red),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true || !context.mounted) return;
-
-    try {
-      await FirebaseFirestore.instance.collection('orders').doc(orderId).update(
-        {'orderStatus': 'Cancelled'},
-      );
-      if (context.mounted) {
-        _showThemedSnack(context, "Order cancelled.", isError: false);
-        goBackToMenu(context);
-      }
-    } catch (e) {
-      if (context.mounted) {
-        _showThemedSnack(context, "Failed to cancel order: $e");
-      }
-    }
-  }
-
-  
   Widget _buildBottomBar(BuildContext context) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 10),
