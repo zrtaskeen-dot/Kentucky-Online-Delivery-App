@@ -24,7 +24,7 @@ class OnboardPage2 extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Progress bar + Skip
+              // Progress bar and Skip
               Row(
                 children: [
                   Expanded(child: _buildOnboardProgressBar(1)),
@@ -149,8 +149,6 @@ class OnboardPage2 extends StatelessWidget {
     );
   }
 }
-
-// ── Shared onboarding pieces (local copy — see page1.dart) ──────────
 
 const _onboardPrimary = Color(0xFFA70000);
 const _onboardOrange = Color(0xFFFF8A00);
@@ -277,8 +275,6 @@ Widget _buildOnboardHero({
                   ],
                 ),
                 child: ClipOval(
-                  // 👈 FIX: same as page1.dart — BoxFit.cover was
-                  // cropping the image; BoxFit.contain shows it fully.
                   child: Image.network(imageUrl, fit: BoxFit.contain),
                 ),
               ),

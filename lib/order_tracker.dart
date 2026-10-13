@@ -3,9 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-// ==========================================
-// 1. MAIN TRACKING SCREEN WITH USER AUTH VALIDATION
-// ==========================================
+
 class CustomerOrderTrackerScreen extends StatefulWidget {
   final String orderId;
 
@@ -29,11 +27,11 @@ class _CustomerOrderTrackerScreenState
 
   @override
   void dispose() {
-    _orderSubscription?.cancel(); // Prevents memory leaks and duplicated popups
+    _orderSubscription?.cancel(); 
     super.dispose();
   }
 
-  // Real-time listener with Customer ID and Status Matching
+  
   void _listenToOrderStatus() {
     _orderSubscription = FirebaseFirestore.instance
         .collection('orders')
@@ -45,7 +43,7 @@ class _CustomerOrderTrackerScreenState
 
             if (data == null) return;
 
-            // 1. Order Status check with safe trimming
+            // Order Status check 
             final String status = (data['order_status'] ?? '')
                 .toString()
                 .trim()
@@ -53,20 +51,20 @@ class _CustomerOrderTrackerScreenState
             final bool isFeedbackSubmitted =
                 data['isFeedbackSubmitted'] ?? false;
 
-            // 2. Current Logged-in Customer Auth UID
+            // Current Logged-in Customer ID
             final String? currentUserId =
                 FirebaseAuth.instance.currentUser?.uid;
 
-            // 3. Customer ID from Firestore document (with common fallback keys)
+            // 3. Customer ID from Firestore document 
             final String orderCustomerId =
                 (data['customerId'] ?? data['userId'] ?? data['user_id'] ?? '')
                     .toString();
 
-            // 4. Verification Check: Ensures only the order owner gets the popup
+            // 4. Ensures only the valid customer gets the popup
             final bool isMyOrder =
                 currentUserId != null && currentUserId == orderCustomerId;
 
-            // 🔍 Console Debug Logs
+            
           
           }
         });
@@ -117,9 +115,9 @@ class _CustomerOrderTrackerScreenState
   }
 }
 
-// ==========================================
-// 2. ORDER FEEDBACK POPUP DIALOG (UPDATED)
-// ==========================================
+
+// Order Feedback Popup
+
 class OrderFeedbackDialog extends StatefulWidget {
   final String orderId;
 
@@ -130,7 +128,7 @@ class OrderFeedbackDialog extends StatefulWidget {
 }
 
 class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
-  int _selectedRating = 1; // ✅ minimum/default rating = 1
+  int _selectedRating = 1; 
   final TextEditingController _feedbackController = TextEditingController();
   bool _isLoading = false;
 
@@ -145,12 +143,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
     super.dispose();
   }
 
-  // Customer tapped the ✕ instead of rating. We still mark the order as
-  // "handled" (isFeedbackSubmitted: true, with no rating/comment) so
-  // GlobalFeedbackListener's query — which only looks for
-  // isFeedbackSubmitted == false — never picks this order up again. That's
-  // what makes the popup appear exactly once per delivered order, whether
-  // the customer rates it or dismisses it.
+ 
   Future<void> _dismissWithoutRating() async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
@@ -172,7 +165,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
     try {
       final currentUserId = FirebaseAuth.instance.currentUser?.uid;
 
-      // Update current order document
+      // Update  order document
       await FirebaseFirestore.instance
           .collection('orders')
           .doc(widget.orderId)
@@ -183,14 +176,14 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
             'feedbackSubmittedAt': FieldValue.serverTimestamp(),
           });
 
-      // Insert record into dedicated 'reviews' collection
+      // Insert record into reviews collection
       await FirebaseFirestore.instance.collection('reviews').add({
         'orderId': widget.orderId,
         'userId': currentUserId,
         'rating': _selectedRating,
         'comment': _feedbackController.text.trim(),
         'createdAt': FieldValue.serverTimestamp(),
-        'isRead': false, // 🟢 manager dashboard badge ke liye zaroori
+        'isRead': false, 
       });
 
       if (mounted) {
@@ -225,17 +218,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
       5: 'Excellent',
     };
 
-    // Dialog() already pads itself by the keyboard's height when it opens
-    // (via an internal AnimatedPadding using MediaQuery.viewInsets), but
-    // that only shifts the box up — it doesn't cap how tall the box tries
-    // to be. With no insetPadding set, the default margins plus this
-    // dialog's own content (title, 5 stars, comment field, button) could
-    // end up taller than what's left once the keyboard eats roughly half
-    // the screen, which is what made it look like the popup "disappeared"
-    // the moment the comment field was tapped — it was really being
-    // squeezed/pushed mostly off-screen, not closed. Explicit
-    // insetPadding plus capping the content to the space actually left
-    // below the keyboard keeps it fully visible and scrollable instead.
+    
     final double keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
     final double maxDialogHeight =
         MediaQuery.of(context).size.height - keyboardHeight - 48;
@@ -255,9 +238,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Close (✕) — lets the customer skip rating entirely. See
-              // _dismissWithoutRating() for why this still writes to
-              // Firestore instead of just popping the dialog.
+              
               Align(
                 alignment: Alignment.centerRight,
                 child: IconButton(
@@ -287,7 +268,7 @@ class _OrderFeedbackDialogState extends State<OrderFeedbackDialog> {
               ),
               const SizedBox(height: 14),
 
-              // Interactive Rating Bar Card
+             
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 8),

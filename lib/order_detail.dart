@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'cart_provider.dart'; // For CartItem
-import 'main_navigation.dart'; // 👈 CHANGED: HomeScreen ki jagah MainScreen import kiya (bottom nav bar ke liye)
+import 'cart_provider.dart'; 
+import 'main_navigation.dart'; 
 import 'package:latlong2/latlong.dart';
 
 class OrderDetailsScreen extends StatelessWidget {
@@ -29,15 +29,12 @@ class OrderDetailsScreen extends StatelessWidget {
     this.receiptUploaded = false,
   });
 
-  // 👈 Matches HomeScreen's actual brand palette exactly (not a guess anymore)
-  static const Color themeColor = Color(0xFFA70000); // Brand Maroon
-  static const Color accentOrange = Color(0xFFFF8A00); // Brand Orange
-  static const Color bgColor = Colors.white; // Pure white, same as HomeScreen
-  static const Color cardColor = Color(0xFFFFFDFA); // Near-white cards
-  static const Color lightMaroon = Color(0x33A70000); // ~20% maroon border
-
-  // Success/error message card colors — same palette used on the
-  // Login/Signup screens, kept consistent app-wide.
+ 
+  static const Color themeColor = Color(0xFFA70000); 
+  static const Color accentOrange = Color(0xFFFF8A00); 
+  static const Color bgColor = Colors.white; 
+  static const Color cardColor = Color(0xFFFFFDFA); 
+  static const Color lightMaroon = Color(0x33A70000); 
   static const Color successBorder = Color(0xFF4A7C59);
   static const Color successBg = Color(0xFFEAF3ED);
   static const Color successText = Color(0xFF2F5B3E);
@@ -110,7 +107,7 @@ class OrderDetailsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
-        // 👈 CHANGED: maroon app bar with white title, no back arrow (kept automaticallyImplyLeading: false)
+
         backgroundColor: themeColor,
         elevation: 0,
         automaticallyImplyLeading: false,

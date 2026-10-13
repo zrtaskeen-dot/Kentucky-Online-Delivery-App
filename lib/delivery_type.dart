@@ -782,11 +782,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     try {
       final userId =
           FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
-      final cartDocs = await FirebaseFirestore.instance
-          .collection('carts')
-          .where('userId', isEqualTo: userId)
-          .get();
-
       // Sirf isi branch ke items delete karo jahan se order hua; doosri
       // branches ke cart items mehfooz rehte hain.
       final activeBranchId = Provider.of<CartProvider>(
@@ -794,12 +789,11 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         listen: false,
       ).selectedBranchId;
 
-      for (final doc in cartDocs.docs) {
-        final docBranchId = (doc.data()['branchId'] ?? '').toString();
-        if (docBranchId.isEmpty || docBranchId == activeBranchId) {
-          await doc.reference.delete();
-        }
-      }
+      await CartService.recordSales(
+        userId,
+        activeBranchId,
+      ); // Best Selling counter
+      await CartService.clearBranch(userId, activeBranchId);
     } catch (e) {
       debugPrint('Failed to clear cart: $e');
     }
@@ -878,7 +872,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         deliveryTime: deliveryTimeLabel,
         paymentMethod: finalPaymentMethod,
         cartItems: widget.cartItems,
-       
+
         branchId: activeBranchId,
         receiptImageUrl: receiptImageUrl,
       );

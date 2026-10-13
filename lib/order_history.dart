@@ -63,11 +63,6 @@ List<Map<String, dynamic>> _readOrderItems(Map<String, dynamic> orderData) {
       .toList();
 }
 
-// Pakistan Standard Time is a fixed UTC+5 offset — Pakistan doesn't
-// observe daylight saving, so this is always correct regardless of the
-// device's own timezone setting. Converting through .toUtc() first makes
-// this safe even though Timestamp.toDate() already returns a DateTime in
-// the device's local zone.
 String _formatPakistaniDateTime(DateTime dateTime) {
   final pkt = dateTime.toUtc().add(const Duration(hours: 5));
   final day = pkt.day.toString().padLeft(2, '0');
@@ -87,11 +82,6 @@ Stream<QuerySnapshot<Map<String, dynamic>>> _streamMyOrders() {
       .snapshots();
 }
 
-// ── HIDE (UI-only "delete") ──
-// Never deletes the Firestore order document — just adds this customer's
-// uid to the order's `hiddenFor` array. OrderHistoryScreen then filters
-// that doc out of the list. The order record stays in the database
-// untouched (for the restaurant's own records/reports).
 Future<void> _hideOrderForUser({
   required String orderId,
   required String userId,
@@ -106,9 +96,16 @@ Future<void> _reorderItems(
   List<Map<String, dynamic>> items, {
   required String? branchId,
 }) async {
-  final cartsRef = FirebaseFirestore.instance.collection('carts');
   final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
   final cartProvider = Provider.of<CartProvider>(context, listen: false);
+
+  // Items already in the cart , so a reordered item
+  // that is already there just gets its quantity increased.
+  final cartSnap = await FirebaseFirestore.instance
+      .collection('carts')
+      .where('userId', isEqualTo: userId)
+      .get();
+  final cartLines = CartService.linesFromDocs(cartSnap.docs);
 
   for (final item in items) {
     final name = (item['name'] ?? '').toString();
@@ -119,36 +116,32 @@ Future<void> _reorderItems(
     final price = _readItemPrice(item);
     final quantity = _readItemQuantity(item).round();
 
-    final existing = await cartsRef
-        .where('userId', isEqualTo: userId)
-        .where('name', isEqualTo: name)
-        .limit(1)
-        .get();
+    CartLine? existing;
+    for (final line in cartLines) {
+      final lineBranch = (line.data['branchId'] ?? '').toString();
+      final sameBranch =
+          lineBranch.isEmpty ||
+          branchId == null ||
+          branchId.isEmpty ||
+          lineBranch == branchId;
+      if ((line.data['name'] ?? '').toString() == name && sameBranch) {
+        existing = line;
+        break;
+      }
+    }
 
-    if (existing.docs.isNotEmpty) {
-      final doc = existing.docs.first;
-      final existingData = doc.data();
-      final currentQty = int.tryParse(existingData['quantity'].toString()) ?? 1;
-      final currentPrice = _readPriceValue(existingData['price']);
-
-      await doc.reference.update({
-        'quantity': currentQty + quantity,
-        if (currentPrice <= 0) 'price': price,
-        // Backfill branchId on older cart rows that predate this field,
-        // so they also start counting toward the Home Screen cart badge.
-        if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
-      });
+    if (existing != null) {
+      final currentQty =
+          int.tryParse(existing.data['quantity'].toString()) ?? 1;
+      await CartService.setQuantity(existing, currentQty + quantity);
     } else {
-      await cartsRef.add({
-        'userId': userId,
+      await CartService.addItem(userId, {
         'name': name,
         'imageUrl': imageUrl,
         'price': price,
         'category': category,
         'quantity': quantity,
-        // ✅ Home Screen's cart badge filters carts by branchId — without
-        // this field, reordered items were saved but invisible to the
-        // badge count (it would silently stay at 0 / not fill up).
+
         if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
       });
     }
@@ -168,19 +161,27 @@ Future<void> _reorderItems(
 class OrderHistoryScreen extends StatelessWidget {
   const OrderHistoryScreen({super.key});
 
-  // 👈 Matches HomeScreen's actual brand palette: white bg + orange/maroon
-  static const Color themeColor = Color(0xFFA70000); // Brand Maroon
-  static const Color accentOrange = Color(0xFFFF8A00); // Brand Orange
+  static const Color themeColor = Color(0xFFA70000);
+  static const Color accentOrange = Color(0xFFFF8A00);
   static const Color bgColor = Colors.white;
   static const Color creamColor = Colors.white;
   static const Color cardColor = Color(0xFFFFFDFA);
   static const Color outlineColor = Color(0x33A70000);
 
-  static const List<String> _pastStatuses = ['delivered', 'cancelled'];
+  // Orders in these statuses are finished: they leave Active Orders, go to
+  // Order History, and no longer show the Track Order button.
+  static const List<String> _pastStatuses = [
+    'delivered',
+    'cancelled',
+    'incomplete',
+    'undelivered',
+  ];
 
   @override
   Widget build(BuildContext context) {
     final currentUserId = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    final selectedBranchId = context.watch<CartProvider>().selectedBranchId;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -207,15 +208,16 @@ class OrderHistoryScreen extends StatelessWidget {
             return _buildEmptyState();
           }
 
-          // Drop any order this customer has hidden from their own list
-          // (via swipe/delete on a past order). The document itself is
-          // untouched in Firestore — this only affects what this
-          // customer sees.
           final allDocs = snapshot.data!.docs.where((doc) {
-            final hiddenFor = List<String>.from(
-              doc.data()['hiddenFor'] ?? const [],
-            );
-            return !hiddenFor.contains(currentUserId);
+            final data = doc.data();
+            final hiddenFor = List<String>.from(data['hiddenFor'] ?? const []);
+            if (hiddenFor.contains(currentUserId)) return false;
+
+            if (selectedBranchId.isNotEmpty &&
+                (data['branchId'] ?? '').toString() != selectedBranchId) {
+              return false;
+            }
+            return true;
           }).toList();
 
           final activeDocs = allDocs.where((doc) {
@@ -257,8 +259,8 @@ class OrderHistoryScreen extends StatelessWidget {
               if (activeDocs.isNotEmpty) ...[
                 _sectionHeader("Active Orders", Icons.local_shipping_rounded),
                 const SizedBox(height: 8),
-                // Active orders are NEVER dismissible/deletable — no
-                // Dismissible wrapper here, just the plain card.
+                // Active orders are can deletable
+
                 ...activeDocs.map(
                   (doc) => _OrderCard(
                     orderId: doc.id,
@@ -271,8 +273,7 @@ class OrderHistoryScreen extends StatelessWidget {
               if (pastDocs.isNotEmpty) ...[
                 _sectionHeader("Order History", Icons.history_rounded),
                 const SizedBox(height: 8),
-                // Past orders CAN be swiped away — hides it from this
-                // customer's list only, the order record stays saved.
+
                 ...pastDocs.map(
                   (doc) => Dismissible(
                     key: ValueKey(doc.id),
@@ -317,8 +318,7 @@ class OrderHistoryScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.w800, color: Colors.black87),
         ),
         content: Text(
-          'Do you want to delete this order? It stays on your order '
-          'record — this only removes it from your history list.',
+          'Do you want to delete this order?',
           style: TextStyle(color: Colors.grey[700], fontSize: 13),
         ),
         actionsPadding: const EdgeInsets.only(right: 12, bottom: 8),
@@ -380,13 +380,6 @@ class OrderHistoryScreen extends StatelessWidget {
   }
 }
 
-// Rebuilds [builder] every [interval] so time-based UI — like the
-// scheduled-order cancel window — keeps itself up to date while the
-// screen stays open, instead of only updating on the next Firestore
-// snapshot. Without this, a customer watching the screen as the clock
-// crosses the 1h30m cutoff wouldn't see the Cancel button disappear
-// until something else (a data change, re-navigating, etc.) triggered
-// a rebuild.
 class _LiveTicker extends StatefulWidget {
   const _LiveTicker({required this.builder})
     : interval = const Duration(seconds: 30);
@@ -457,20 +450,14 @@ class _OrderCard extends StatelessWidget {
   String get _paymentMethod =>
       (data['paymentMethod'] ?? data['payment_method'] ?? '—').toString();
 
-  // Delivery screen sets this to "Standard Delivery" for immediate
-  // orders, and a formatted date/time string for scheduled orders.
   bool get _isScheduled => _deliveryTime != "Standard Delivery";
 
-  // Delivery screen sets this to "Cash On Delivery" for COD, and the
-  // provider name (EasyPaisa/JazzCash) for online payments.
   bool get _isOnlinePayment => _paymentMethod != "Cash On Delivery";
 
   String get _receiptUrl =>
       (data['receiptImageUrl'] ?? data['receipt_url'] ?? '').toString();
 
-  // Scheduled + Online orders that haven't had their receipt uploaded
-  // yet aren't confirmed — matches the same check used in
-  // order_history_detail.dart.
+  // Scheduled/Online orders
   bool get _needsReceiptUpload =>
       !isPast && _isScheduled && _isOnlinePayment && _receiptUrl.isEmpty;
 
@@ -480,8 +467,10 @@ class _OrderCard extends StatelessWidget {
         return Colors.green;
       case 'cancelled':
         return Colors.red;
+      case 'incomplete':
+      case 'undelivered':
+        return Colors.deepOrange;
       case 'on the way':
-      case 'out for delivery':
         return Colors.blue;
       default:
         return Colors.orange;
@@ -494,36 +483,201 @@ class _OrderCard extends StatelessWidget {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: const [
-            Icon(Icons.cancel_outlined, color: Colors.red, size: 28),
-            SizedBox(width: 8),
-            Text(
-              "Order Cancelled",
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-          ],
+      builder: (context) => Dialog(
+        backgroundColor: Colors.white,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: outlineColor, width: 1),
         ),
-        content: Text(
-          cancelledByCustomer
-              ? "You cancelled this order."
-              : "Your order has been cancelled by the restaurant manager due to an invalid payment receipt.",
-          style: const TextStyle(fontSize: 14, color: Colors.black87),
-        ),
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: themeColor,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.cancel_rounded,
+                    color: Colors.red,
+                    size: 30,
+                  ),
+                ),
               ),
-            ),
-            onPressed: () => Navigator.pop(context),
-            child: const Text("OK", style: TextStyle(color: Colors.white)),
+              const SizedBox(height: 14),
+              const Text(
+                "Order Cancelled",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  color: themeColor,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: outlineColor),
+                ),
+                child: Text(
+                  cancelledByCustomer
+                      ? "You cancelled this order."
+                      : "Your order has been cancelled by the restaurant manager due to an invalid payment receipt.",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: themeColor,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  "OK",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  void _showIncompleteDialog(BuildContext context) {
+    _showStatusReasonDialog(
+      context,
+      title: "Order Incomplete",
+      reason: (data['incompleteReason'] ?? '').toString().trim(),
+      emptyText: "This order could not be completed.",
+    );
+  }
+
+  // Reason the rider selected when marking the order Undelivered
+  // (`undeliveredReason`, plus `undeliveredNote` for "Other reason").
+  void _showUndeliveredDialog(BuildContext context) {
+    final String base = (data['undeliveredReason'] ?? '').toString().trim();
+    final String note = (data['undeliveredNote'] ?? '').toString().trim();
+    final String reason = note.isEmpty
+        ? base
+        : (base.isEmpty ? note : '$base\n$note');
+    _showStatusReasonDialog(
+      context,
+      title: "Order Undelivered",
+      reason: reason,
+      emptyText: "Your order could not be delivered.",
+    );
+  }
+
+  void _showStatusReasonDialog(
+    BuildContext context, {
+    required String title,
+    required String reason,
+    required String emptyText,
+  }) {
+    const Color accent = OrderHistoryScreen.accentOrange;
+
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.white,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 28),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: const BorderSide(color: outlineColor, width: 1),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.report_problem_rounded,
+                    color: accent,
+                    size: 30,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 18,
+                  color: themeColor,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: outlineColor),
+                ),
+                child: Text(
+                  reason.isNotEmpty ? reason : emptyText,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.4,
+                    color: Colors.black87,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: themeColor,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  "OK",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -597,10 +751,7 @@ class _OrderCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                      // Confirmation status (Not Confirmed / Confirmed) is
-                      // intentionally NOT shown here — only inside the
-                      // order details sheet, per the "Confirmed" status
-                      // living in details, not on the card, requirement.
+                      // Confirmation status (Not Confirmed / Confirmed)
                     ],
                   ),
                 ),
@@ -667,31 +818,7 @@ class _OrderCard extends StatelessWidget {
               ],
             ),
 
-            if (_status == 'cancelled') ...[
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                height: 28,
-                child: OutlinedButton.icon(
-                  onPressed: () => _showCancellationDialog(context),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    side: const BorderSide(color: Colors.red),
-                    padding: EdgeInsets.zero,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  icon: const Icon(Icons.info_outline_rounded, size: 13),
-                  label: const Text(
-                    "View Cancellation Reason",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
-                  ),
-                ),
-              ),
-            ],
-
-            if (items.isNotEmpty && _status != 'cancelled') ...[
+            if (items.isNotEmpty) ...[
               const SizedBox(height: 6),
               Align(
                 alignment: Alignment.centerRight,
@@ -720,6 +847,56 @@ class _OrderCard extends StatelessWidget {
                         fontSize: 10.5,
                       ),
                     ),
+                  ),
+                ),
+              ),
+            ],
+
+            if (_status == 'cancelled') ...[
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                height: 28,
+                child: OutlinedButton.icon(
+                  onPressed: () => _showCancellationDialog(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.red,
+                    side: const BorderSide(color: Colors.red),
+                    padding: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.info_outline_rounded, size: 13),
+                  label: const Text(
+                    "View Cancellation Reason",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                  ),
+                ),
+              ),
+            ],
+
+            if (_status == 'incomplete' || _status == 'undelivered') ...[
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                height: 28,
+                child: OutlinedButton.icon(
+                  onPressed: () => _status == 'incomplete'
+                      ? _showIncompleteDialog(context)
+                      : _showUndeliveredDialog(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.deepOrange,
+                    side: const BorderSide(color: Colors.deepOrange),
+                    padding: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  icon: const Icon(Icons.info_outline_rounded, size: 13),
+                  label: const Text(
+                    "View Reason",
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                   ),
                 ),
               ),

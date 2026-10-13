@@ -35,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
   static const Color bgColor = Colors.white;
   static const Color themeColor = Color(0xFFA70000);
   static const Color creamColor = Color(0xFFFEF9E7);
-  static const Color fieldColor = Color(0xFFFFFDFA); 
+  static const Color fieldColor = Color(0xFFFFFDFA);
   static const Color successBorder = Color(0xFF4A7C59);
   static const Color successBg = Color(0xFFEAF3ED);
   static const Color successText = Color(0xFF2F5B3E);
@@ -122,10 +122,9 @@ class _LoginScreenState extends State<LoginScreen> {
         'createdAt': FieldValue.serverTimestamp(),
       };
       await FirebaseFirestore.instance.collection("system_log").add(payload);
-      await FirebaseFirestore.instance.collection("activity_logs").add(payload);
     } catch (e) {
       // Logging failure should never block login flow.
-      debugPrint('Activity log failed: $e');
+      debugPrint('System log failed: $e');
     }
   }
 
@@ -323,14 +322,15 @@ class _LoginScreenState extends State<LoginScreen> {
         }
         if (widget.role == 'customer' && _isStaffData(userData)) {
           await FirebaseAuth.instance.signOut();
-          _showSnack(
-            "This is a manag account. Please use the Rider app.",
-          );
+          _showSnack("This is a manager account.Can't be used here.");
           return;
         }
 
         final customerName =
-            (userData['name'] ?? userData['fullName'] ?? user.displayName ?? email)
+            (userData['name'] ??
+                    userData['fullName'] ??
+                    user.displayName ??
+                    email)
                 .toString();
 
         final userStatus = (userData['status'] ?? 'active').toString();
@@ -733,40 +733,40 @@ class _LoginScreenState extends State<LoginScreen> {
     String? Function(String?)? validator,
   }) {
     return TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        obscureText: obscureText,
-        style: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-          color: Colors.black87,
+      controller: controller,
+      keyboardType: keyboardType,
+      obscureText: obscureText,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.w600,
+        color: Colors.black87,
+      ),
+      validator: validator,
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: fieldColor,
+        prefixIcon: Icon(icon, color: themeColor, size: 20),
+        suffixIcon: suffixIcon,
+        labelText: label,
+        labelStyle: const TextStyle(color: Colors.black54, fontSize: 13),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 16,
+          horizontal: 12,
         ),
-        validator: validator,
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: fieldColor,
-          prefixIcon: Icon(icon, color: themeColor, size: 20),
-          suffixIcon: suffixIcon,
-          labelText: label,
-          labelStyle: const TextStyle(color: Colors.black54, fontSize: 13),
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 16,
-            horizontal: 12,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Colors.black38),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: Colors.black38),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: themeColor, width: 1.6),
-          ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.black38),
         ),
-      );
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Colors.black38),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: themeColor, width: 1.6),
+        ),
+      ),
+    );
   }
 
   Widget _buildDivider() {

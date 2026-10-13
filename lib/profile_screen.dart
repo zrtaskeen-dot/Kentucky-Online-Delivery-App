@@ -51,13 +51,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       final data = doc.exists ? (doc.data() ?? {}) : <String, dynamic>{};
 
-      // ── FIXED: order data now only fills in as a FALLBACK ──────────
-      // Pehle ye block phone/address ko HAMESHA overwrite kar
-      // deta tha latest order ki value se, chahe user ne apne profile
-      // mein khud value save ki ho. Isi wajah se Profile screen pe
-      // edit karne ke baad bhi purani (order wali) value dobara dikh
-      // jati thi jab screen reload hoti thi. Ab ye sirf tab use hota
-      // hai jab user ki apni profile mein wo field khali ho.
+      
       try {
         final uid = user!.uid;
 
@@ -94,7 +88,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           final existingPhone = (data['phone'] ?? '').toString();
           final existingAddress = (data['address'] ?? '').toString();
 
-          // Only fall back to order data if user hasn't set their own value.
+         
           if (existingPhone.trim().isEmpty && orderPhone.trim().isNotEmpty) {
             data['phone'] = orderPhone;
           }
@@ -106,7 +100,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       } catch (e) {
         debugPrint("Order fetch error: $e");
       }
-      // ─────────────────────────────────────────────────────────────
+     
 
       setState(() {
         _userData = data;
@@ -117,7 +111,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Profile Picture Upload Logic
+  // Profile Picture Upload
   Future<void> _pickAndUploadImage() async {
     final XFile? pickedFile = await _picker.pickImage(
       source: ImageSource.gallery,
@@ -151,7 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SetOptions(merge: true),
         );
 
-        // Update Auth Profile
+        // Update  Profile
         await user?.updatePhotoURL(photoUrl);
 
         setState(() {
@@ -163,7 +157,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text("Profile picture updated successfully"),
-              backgroundColor: primary, // Maroon
+              backgroundColor: primary, 
             ),
           );
         }
@@ -183,9 +177,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Same 10-digit-after-+92 rule as checkout — kept here too so a number
-  // saved directly from Profile is just as valid as one saved via an
-  // order, since checkout now reads its default phone from this profile.
+  
   String _localPhoneDigits(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     if (digits.length >= 10) return digits.substring(digits.length - 10);
@@ -203,8 +195,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       'address': Icons.location_on_outlined,
     };
 
-    // StatefulBuilder ke BAHAR: andar hota to har rebuild par null ho jata
-    // aur "Enter exactly 10 digits" error kabhi nazar nahi aata.
     String? phoneError;
 
     showGeneralDialog(
@@ -223,8 +213,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       },
       pageBuilder: (ctx, _, __) {
-        // StatefulBuilder so the phone field can show a validation error
-        // inline instead of closing the dialog and popping a snackbar.
+        
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return Center(
@@ -234,7 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   margin: const EdgeInsets.symmetric(horizontal: 28),
                   padding: const EdgeInsets.all(28),
                   decoration: BoxDecoration(
-                    color: bgColor, // CHANGED: cream instead of white
+                    color: bgColor, 
                     borderRadius: BorderRadius.circular(28),
                     boxShadow: [
                       BoxShadow(
@@ -250,7 +239,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: const BoxDecoration(
-                          color: cardColor, // CHANGED: cream instead of grey
+                          color: cardColor, 
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -307,7 +296,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           errorText: phoneError,
                           filled: true,
                           fillColor:
-                              cardColor, // CHANGED: cream instead of Color(0xFFFAF7F0)
+                              cardColor, 
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none,
@@ -332,8 +321,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             child: OutlinedButton(
                               onPressed: () => Navigator.pop(ctx),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFDDDDDD)),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                side: const BorderSide(
+                                  color: Color(0xFFDDDDDD),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -352,7 +345,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: primary,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -361,12 +356,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               onPressed: () async {
                                 final rawInput = controller.text.trim();
 
-                                // Phone must be exactly 10 digits (after
-                                // +92) — same rule checkout enforces.
+                                // Phone must be  10 digits 
                                 if (isPhone && rawInput.length != 10) {
                                   setDialogState(
-                                    () => phoneError =
-                                        'Enter exactly 10 digits',
+                                    () =>
+                                        phoneError = 'Enter exactly 10 digits',
                                   );
                                   return;
                                 }
@@ -384,10 +378,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       fieldKey: newVal,
                                     }, SetOptions(merge: true));
 
-                                // ── ADDED: keep FirebaseAuth's displayName in
-                                // sync when the "name" field is edited, so any
-                                // screen reading FirebaseAuth.currentUser
-                                // directly (instead of Firestore) also updates.
+                               
                                 if (fieldKey == 'name') {
                                   await user?.updateDisplayName(newVal);
                                   await user?.reload();
@@ -401,7 +392,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                       content: Text(
                                         "$fieldLabel updated successfully",
                                       ),
-                                      backgroundColor: primary, // Maroon
+                                      backgroundColor: primary, 
                                     ),
                                   );
                                 }
@@ -429,6 +420,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+ 
+  void _showMaroonSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            message,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          backgroundColor: primary,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+  }
+
+  Future<void> _logout() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      _showMaroonSnack('Logged out successfully');
+      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+    } catch (e) {
+      debugPrint('Logout failed: $e');
+      _showMaroonSnack('Logout failed. Please try again.');
+    }
+  }
+
   void _openTermsAndConditions() {
     Navigator.push(
       context,
@@ -448,13 +474,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         onTap: () => _editField(fieldKey, label, value),
         child: AbsorbPointer(
           child: TextFormField(
-            // 👈 FIX: a plain TextFormField only reads `initialValue` the
-            // first time it's built — after Save, setState() rebuilds this
-            // widget with a new `value`, but Flutter keeps the OLD text
-            // because it's "the same field" from its point of view. Keying
-            // it by the value forces Flutter to treat it as a fresh field
-            // whenever the value actually changes, so the new text shows
-            // immediately instead of only after a full screen reload.
+           
             key: ValueKey('$fieldKey:$value'),
             initialValue: value,
             readOnly: true,
@@ -552,14 +572,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
-        // // leading: IconButton(
-        // //   icon: const Icon(
-        // //     Icons.arrow_back_ios_new_rounded,
-        // //     color: primary,
-        // //     size: 22,
-        // //   ),
-        //   // onPressed: () => Navigator.pop(context),
-        // ),
+       
         title: const Text(
           'My Profile',
           style: TextStyle(
@@ -578,7 +591,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   const SizedBox(height: 16),
 
-                  // Interactive Profile Picture Avatar
                   GestureDetector(
                     onTap: _isUploadingImage ? null : _pickAndUploadImage,
                     child: Stack(
@@ -689,16 +701,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    onPressed: () async {
-                      await FirebaseAuth.instance.signOut();
-                      if (context.mounted) {
-                        Navigator.pushNamedAndRemoveUntil(
-                          context,
-                          '/',
-                          (route) => false,
-                        );
-                      }
-                    },
+                    onPressed: _logout,
                   ),
                   const SizedBox(height: 14),
                   TextButton(
@@ -724,21 +727,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
 class _TermsAndConditionsScreen extends StatelessWidget {
   const _TermsAndConditionsScreen();
 
-  static const primary = Color(0xFFA70000);
   static const bgColor = Colors.white;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: bgColor, 
       appBar: AppBar(
         backgroundColor: bgColor,
+        surfaceTintColor: Colors.transparent, 
         elevation: 0,
+        scrolledUnderElevation: 0,
         leading: IconButton(
+          
           icon: const Icon(
-            Icons.arrow_back_ios_new_rounded,
-            color: primary,
-            size: 22,
+            Icons.arrow_back_outlined,
+            color: Colors.black,
+            size: 24,
           ),
           onPressed: () => Navigator.pop(context),
         ),
@@ -755,19 +760,13 @@ class _TermsAndConditionsScreen extends StatelessWidget {
       body: const SingleChildScrollView(
         padding: EdgeInsets.all(20),
         child: Text(
-          'Welcome to our app. By using this app you agree to the '
-          'following terms and conditions.\n\n'
-          '1. Orders once placed cannot be modified after they are '
-          'confirmed by the restaurant.\n\n'
-          '2. Delivery times are estimates and may vary due to traffic, '
-          'weather, or other conditions beyond our control.\n\n'
-          '3. Payment must be completed through the supported methods '
-          'shown at checkout.\n\n'
-          '4. Personal information (name, phone, address) is used only '
-          'to process and deliver your orders.\n\n'
-          '5. We reserve the right to update these terms at any time; '
-          'continued use of the app means you accept the updated terms.\n\n'
-          ,
+          'Welcome to our app. By using it, you agree to these terms and conditions.\n\n'
+          '1. Confirmed orders cannot be modified.\n\n'
+          '2. Delivery times may vary due to traffic, weather, or other factors.\n\n'
+          '3. Use the supported payment methods to pay for your order.\n\n'
+          '4. Scheduled orders can be cancelled up to 1 hour and 30 minutes before delivery. After that, cancellation is not allowed.\n\n'
+          '5. For scheduled online payments, upload your payment receipt in the app. Payment opens 1 hour and 30 minutes before delivery. Without a receipt, your order will not be confirmed or delivered.\n\n'
+          '6. Your name, phone number, and address are used only for order processing and delivery.\n\n',
           style: TextStyle(fontSize: 14, height: 1.6, color: Colors.black87),
         ),
       ),

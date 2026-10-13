@@ -1,8 +1,3 @@
-// ════════════════════════════════════════════════════════════
-// TIER 1 — DATA LAYER (REPOSITORY)
-// rider_auth_repository.dart
-// ════════════════════════════════════════════════════════════
-
 import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -61,18 +56,6 @@ class RiderAuthRepository {
   }) async {
     try {
       final userRef = _firestore.collection('users').doc(uid);
-
-      // Guard against silently clobbering an existing account. This used
-      // to be an unconditional .set() with no merge and no existence
-      // check, so if `uid` ever matched an account that already existed
-      // under a different role (e.g. a customer account reused for rider
-      // testing), this call would fully replace that document — wiping
-      // the customer's own name/email and replacing them with the
-      // rider's. That single shared "users/{uid}" doc is exactly why a
-      // customer's name can end up showing as the rider's name (and vice
-      // versa) even after restarting the app. Rider accounts should use
-      // their own dedicated uid, never a uid already in use for another
-      // role.
       final existing = await userRef.get();
       if (existing.exists) {
         final existingRole = existing.data()?['role'];
@@ -118,7 +101,7 @@ class RiderAuthRepository {
 
         if (updates.isNotEmpty) {
           await _firestore.collection('users').doc(uid).update(updates);
-          debugPrint("✅ Missing fields added for rider: $uid");
+          debugPrint(" Missing fields added for rider: $uid");
         }
       }
     } catch (e) {
@@ -142,7 +125,7 @@ class RiderAuthRepository {
     }
   }
 
-  // ── LIVE LOCATION TRACKING ──────────────────────────────────
+  //LIVE LOCATION TRACKING
 
   Future<void> updateOrderLocation(
     String orderId,
@@ -160,7 +143,7 @@ class RiderAuthRepository {
     }
   }
 
-  // ── PROFILE MANAGEMENT ──────────────────────────────────────
+  // PROFILE MANAGEMENT 
 
   Future<void> updateRiderProfileField(
     String riderId,
@@ -176,59 +159,7 @@ class RiderAuthRepository {
       rethrow;
     }
   }
-
-  /// 🟢 DIRECT UPDATE EMAIL IN BOTH AUTH & FIRESTORE
-  Future<void> updateRiderEmail({
-    required String riderId,
-    required String newEmail,
-    required String currentPassword,
-  }) async {
-    try {
-      User? user = _auth.currentUser;
-      if (user != null && user.email != null) {
-        // 1. Re-authenticate User with Current Password
-        AuthCredential credential = EmailAuthProvider.credential(
-          email: user.email!,
-          password: currentPassword,
-        );
-        UserCredential reauthResult = await user.reauthenticateWithCredential(
-          credential,
-        );
-
-        // 2. Direct Auth Email Update (Bina Verification Email Link ke)
-        await reauthResult.user?.updateEmail(newEmail);
-
-        // 3. User State Sync / Reload
-        await _auth.currentUser?.reload();
-
-        // 4. Firestore Document Update
-        await _firestore.collection('users').doc(riderId).update({
-          'email': newEmail,
-        });
-      } else {
-        throw Exception('No logged in user found.');
-      }
-    } on FirebaseAuthException catch (e) {
-      debugPrint("updateRiderEmail Auth Error: ${e.code}");
-      if (e.code == 'wrong-password') {
-        throw Exception('Aap ka enter kiya hua password ghalat hai.');
-      } else if (e.code == 'email-already-in-use') {
-        throw Exception(
-          'Yeh email kisi aur account ke sath already registered hai.',
-        );
-      } else if (e.code == 'invalid-email') {
-        throw Exception('Email format sahi nahi hai.');
-      } else if (e.code == 'requires-recent-login') {
-        throw Exception('Security issue: Dobara logout karke login karein.');
-      } else {
-        throw Exception(e.message ?? 'Auth Error');
-      }
-    } catch (e) {
-      debugPrint("updateRiderEmail Error: $e");
-      rethrow;
-    }
-  }
-
+// UPDATE PHOTO
   Future<void> uploadRiderPhoto(String riderId, File imageFile) async {
     try {
       final url = Uri.parse(
@@ -260,29 +191,7 @@ class RiderAuthRepository {
     }
   }
 
-  Future<void> updateRiderPassword(String newPassword) async {
-    try {
-      User? user = _auth.currentUser;
-      if (user != null) {
-        await user.updatePassword(newPassword);
-      } else {
-        throw Exception('No logged in user found.');
-      }
-    } on FirebaseAuthException catch (e) {
-      debugPrint("updateRiderPassword Auth Error: ${e.message}");
-      if (e.code == 'requires-recent-login') {
-        throw Exception(
-          'Please re-authenticate before updating your password.',
-        );
-      }
-      rethrow;
-    } catch (e) {
-      debugPrint("updateRiderPassword Error: $e");
-      rethrow;
-    }
-  }
-
-  // ── LIVE STREAMS & UPDATES (ORDERS SECTIONS) ──────────────────
+  // ORDRS SECTIONS
 
   Stream<QuerySnapshot> getPendingOrdersStream(String riderId) {
     return _firestore

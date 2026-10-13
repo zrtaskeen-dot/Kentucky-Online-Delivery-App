@@ -68,6 +68,29 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
   final ImagePicker _picker = ImagePicker();
   bool _isUploadingImage = false;
 
+  // Maroon, floating message in the app's theme (white text, rounded).
+  void _showMaroonSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            message,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          backgroundColor: primary,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+  }
+
   // -- LOGOUT METHOD --
   Future<void> _logout() async {
     try {
@@ -75,15 +98,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Logged out successfully',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: primary,
-        ),
-      );
+      _showMaroonSnack('Logged out successfully');
 
       // Root navigator + pushNamedAndRemoveUntil('/', ...) taake bottom-nav
       // ke nested Navigator mein na phanse aur har screen clear ho jaye.
@@ -92,14 +107,8 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
         rootNavigator: true,
       ).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Logout failed: $e'),
-            backgroundColor: Colors.black87,
-          ),
-        );
-      }
+      debugPrint('Logout failed: $e');
+      _showMaroonSnack('Logout failed. Please try again.');
     }
   }
 

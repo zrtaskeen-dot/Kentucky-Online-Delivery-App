@@ -8,15 +8,13 @@ import 'notification_service.dart';
 import 'splash_screen.dart';
 import 'global_feedback_listener.dart';
 import 'rider/rider_logic.dart';
-
-// Screens for Deep Linking Navigation
 import 'live_tracking.dart';
 import 'order_history.dart';
 
-// Global Key for programmatic navigation upon notification tap
+
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// Top-level function for background FCM messages
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
@@ -28,13 +26,13 @@ void main() async {
   try {
     await Firebase.initializeApp();
 
-    // 1. Set background message handler
+   
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // 2. Initialize local notifications and FCM listeners
+   
     await NotificationService().initNotifications();
 
-    // 3. Check for notification click from terminated state
+    
     await NotificationService().checkInitialMessage();
 
     print("Firebase and FCM Initialized Successfully");
@@ -60,7 +58,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _setupNotificationNavigation() {
-    // 1. Handle app launch from Terminated State when notification is tapped
+    
     FirebaseMessaging.instance.getInitialMessage().then((
       RemoteMessage? message,
     ) {
@@ -69,7 +67,7 @@ class _MyAppState extends State<MyApp> {
       }
     });
 
-    // 2. Handle notification tap when app is in Background State
+    
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleDeepLink(message.data);
     });
@@ -84,27 +82,16 @@ class _MyAppState extends State<MyApp> {
         MaterialPageRoute(builder: (_) => LiveTrackingScreen(orderId: orderId)),
       );
     } else if (screen == 'assigned_orders' && orderId != null) {
-      // Navigate Rider to Assigned Orders Screen
-      // navigatorKey.currentState?.push(
-      //   MaterialPageRoute(
-      //     builder: (_) => RiderAssignedOrdersScreen(targetOrderId: orderId),
-      //   ),
-      // );
+    
     } else if (screen == 'order_history') {
       navigatorKey.currentState?.push(
         MaterialPageRoute(builder: (_) => const OrderHistoryScreen()),
       );
     } else if (data['type'] == 'new_menu_item') {
-      // Naya deal/item/combo notification tap hone par uski detail
-      // screen par navigate karo. "menuItemId" Cloud Function
-      // (notifyCustomersOnNewMenuItem) se data payload mein aata hai.
+     
       final String? menuItemId = data['menuItemId'];
       if (menuItemId != null) {
-        // navigatorKey.currentState?.push(
-        //   MaterialPageRoute(
-        //     builder: (_) => MenuItemDetailScreen(menuItemId: menuItemId),
-        //   ),
-        // );
+       
       }
     }
   }
@@ -117,7 +104,7 @@ class _MyAppState extends State<MyApp> {
         ChangeNotifierProvider(create: (_) => RiderController()),
       ],
       child: MaterialApp(
-        navigatorKey: navigatorKey, // Attached global key for navigation
+        navigatorKey: navigatorKey,
         debugShowCheckedModeBanner: false,
        
         builder: (context, child) {

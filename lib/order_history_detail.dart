@@ -5,12 +5,6 @@ import 'dart:async';
 import 'live_tracking.dart';
 import 'receipt_upload_button.dart';
 
-// Rebuilds [builder] every [interval] so time-based UI — like the
-// scheduled-order cancel window — keeps itself up to date while this
-// bottom sheet stays open, instead of only updating when it's first
-// shown. Without this, a customer reading the order details as the
-// clock crosses the 1h30m cutoff wouldn't see the Cancel button
-// disappear until they closed and reopened the sheet.
 class _LiveTicker extends StatefulWidget {
   const _LiveTicker({required this.builder})
     : interval = const Duration(seconds: 30);
@@ -53,12 +47,7 @@ double _readPriceValue(dynamic raw) {
 }
 
 double _readItemPrice(Map<String, dynamic> item) {
-  final raw =
-      item['price'] ??
-      item['itemPrice'] ??
-      item['unitPrice'] ??
-      item['amount'] ??
-      item['cost'];
+  final raw = item['price'];
   return _readPriceValue(raw);
 }
 
@@ -72,15 +61,7 @@ double _computeOrderTotal(
   Map<String, dynamic> orderData,
   List<Map<String, dynamic>> items,
 ) {
-  final raw =
-      orderData['totalAmount'] ??
-      orderData['total_bill'] ??
-      orderData['totalPrice'] ??
-      orderData['total'] ??
-      orderData['grandTotal'] ??
-      orderData['finalAmount'] ??
-      orderData['orderTotal'] ??
-      orderData['amount'];
+  final raw = orderData['totalAmount'];
   final t = _readPriceValue(raw);
   if (t > 0) return t;
 
@@ -92,7 +73,7 @@ double _computeOrderTotal(
 }
 
 List<Map<String, dynamic>> _readOrderItems(Map<String, dynamic> orderData) {
-  final raw = orderData['items'] ?? orderData['cartItems'] ?? [];
+  final raw = orderData['items'] ?? [];
   if (raw is! List) return [];
   return raw
       .whereType<Map>()
@@ -110,14 +91,20 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   final String orderId;
   final Map<String, dynamic> data;
 
-  // 👈 Matches HomeScreen's actual brand palette: white bg + orange/maroon
-  static const Color themeColor = Color(0xFFA70000); // Brand Maroon
-  static const Color accentOrange = Color(0xFFFF8A00); // Brand Orange
+  static const Color themeColor = Color(0xFFA70000);
+  static const Color accentOrange = Color(0xFFFF8A00);
   static const Color bgColor = Colors.white;
   static const Color cardColor = Color(0xFFFFFDFA);
   static const Color lightMaroon = Color(0x33A70000);
 
-  static const List<String> _pastStatuses = ['delivered', 'cancelled'];
+  // Orders in these statuses are finished: they leave Active Orders, go to
+  // Order History, and no longer show the Track Order button.
+  static const List<String> _pastStatuses = [
+    'delivered',
+    'cancelled',
+    'incomplete',
+    'undelivered',
+  ];
 
   static Future<void> show(
     BuildContext context, {
@@ -160,81 +147,43 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   }
 
   String get _status =>
-      (data['orderStatus'] ?? data['order_status'] ?? 'pending')
-          .toString()
-          .toLowerCase();
+      (data['orderStatus'] ?? 'pending').toString().toLowerCase();
 
   bool get _isActive => !_pastStatuses.contains(_status);
 
   bool get _hasRiderAssigned {
-    final riderId =
-        data['riderId'] ??
-        data['rider_id'] ??
-        data['assignedRiderId'] ??
-        data['assigned_rider_id'] ??
-        data['driverId'] ??
-        data['driver_id'];
+    final riderId = data['riderId'];
     if (riderId == null) return false;
     final s = riderId.toString().trim();
     return s.isNotEmpty && s.toLowerCase() != 'null';
   }
 
-  // The rider/rider's name who accepted the order — shown inside the
-  // details once assigned, alongside the customer's own delivery details.
   String? get _riderName {
-    final name =
-        data['riderName'] ??
-        data['rider_name'] ??
-        data['assignedRiderName'] ??
-        data['assigned_rider_name'] ??
-        data['driverName'] ??
-        data['driver_name'];
+    final name = data['riderName'];
     final s = (name ?? '').toString().trim();
     if (s.isEmpty || s.toLowerCase() == 'null') return null;
     return s;
   }
 
-  String get _name =>
-      (data['customerName'] ?? data['customer_name'] ?? data['name'] ?? '—')
-          .toString();
+  String get _name => (data['customerName'] ?? data['name'] ?? '—').toString();
 
-  String get _phone =>
-      (data['phone'] ?? data['phoneNumber'] ?? data['phone_number'] ?? '—')
-          .toString();
+  String get _phone => (data['phone'] ?? data['phoneNumber'] ?? '—').toString();
 
   String get _address =>
-      (data['deliveryAddress'] ??
-              data['delivery_address'] ??
-              data['address'] ??
-              '—')
-          .toString();
+      (data['deliveryAddress'] ?? data['address'] ?? '—').toString();
 
-  String get _deliveryTime =>
-      (data['deliveryTime'] ?? data['delivery_time'] ?? '—').toString();
+  String get _deliveryTime => (data['deliveryTime'] ?? '—').toString();
 
-  String get _paymentMethod =>
-      (data['paymentMethod'] ?? data['payment_method'] ?? '—').toString();
+  String get _paymentMethod => (data['paymentMethod'] ?? '—').toString();
 
-  // Delivery screen sets this to "Standard Delivery" for immediate
-  // orders, and a formatted date/time string for scheduled orders.
   bool get _isScheduled => _deliveryTime != "As soon as possible";
-
-  // Delivery screen sets this to "Cash On Delivery" for COD, and the
-  // provider name (EasyPaisa/JazzCash) for online payments.
   bool get _isOnlinePayment => _paymentMethod != "Cash On Delivery";
 
-  String get _receiptUrl =>
-      (data['receiptImageUrl'] ?? data['receipt_url'] ?? '').toString();
+  String get _receiptUrl => (data['receiptImageUrl'] ?? '').toString();
 
-  // Only Deliver Later + Online orders that haven't had a receipt
-  // uploaded yet need this button — and only while the order is still
-  // active (not delivered/cancelled).
   bool get _needsReceiptUpload =>
       _isActive && _isScheduled && _isOnlinePayment && _receiptUrl.isEmpty;
 
-  // Parses delivery_screen.dart's "6 Sep 2026 at 05:30 PM" label back
-  // into a DateTime, so we can gate the upload button to the last hour
-  // before delivery. Returns null if it can't be parsed.
   DateTime? get _scheduledDateTime {
     if (!_isScheduled) return null;
     try {
@@ -280,14 +229,10 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     }
   }
 
-  // The payment/receipt upload opens exactly 1h30m before the scheduled
-  // delivery time and closes again when that delivery time arrives — a
-  // window, not just a "not yet" cutoff. Previously there was no upper
-  // bound, so the button stayed visible forever after the scheduled time.
+  // The payment/receipt upload opens exactly 1h30m before
+  // delivery time
   static const Duration _uploadWindow = Duration(hours: 1, minutes: 30);
 
-  // Fails open (window treated as open) if the label can't be parsed,
-  // rather than permanently blocking the upload.
   bool get _isWithinUploadWindow {
     final dt = _scheduledDateTime;
     if (dt == null) return true;
@@ -295,8 +240,6 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     return !now.isBefore(dt.subtract(_uploadWindow)) && now.isBefore(dt);
   }
 
-  // True once the scheduled delivery time has passed with no receipt ever
-  // uploaded — the window is permanently closed, not just "not open yet".
   bool get _isUploadWindowExpired {
     final dt = _scheduledDateTime;
     if (dt == null) return false;
@@ -305,16 +248,8 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
   bool get _canUploadReceiptNow => _needsReceiptUpload && _isWithinUploadWindow;
 
-  // How long before the scheduled delivery time a customer is still
-  // allowed to cancel this order.
   static const Duration _cancelCutoff = Duration(hours: 1, minutes: 30);
 
-  // True while the order can still be cancelled: it must be a scheduled
-  // order, still active (not delivered/cancelled), the scheduled time
-  // must have parsed successfully, and we must be more than 1h30m away
-  // from it. Unlike the upload window above, this fails *closed* if the
-  // time can't be parsed — better to block a cancellation than to let
-  // one through this close to (or past) delivery due to a parsing bug.
   bool get _canCancelOrder {
     if (!_isActive || !_isScheduled) return false;
     final dt = _scheduledDateTime;
@@ -325,8 +260,6 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   String get _dateLabel {
     final ts = data['createdAt'] ?? data['order_date'];
     if (ts is Timestamp) {
-      // ✅ Pakistan Standard Time hai (UTC+5, no DST) — device ki apni
-      // timezone se independent, taake result hamesha PKT mein sahi ho.
       final d = ts.toDate().toUtc().add(const Duration(hours: 5));
       final hour12 = d.hour % 12 == 0 ? 12 : d.hour % 12;
       final period = d.hour >= 12 ? 'PM' : 'AM';
@@ -342,19 +275,16 @@ class OrderHistoryDetailScreen extends StatelessWidget {
         return Colors.green;
       case 'cancelled':
         return Colors.red;
+      case 'incomplete':
+      case 'undelivered':
+        return Colors.deepOrange;
       case 'on the way':
-      case 'out for delivery':
         return Colors.blue;
       default:
         return Colors.orange;
     }
   }
 
-  // ── DELETE (HIDE-ONLY) ──
-  // Same approach as OrderHistoryScreen: never deletes the Firestore order
-  // document — just adds this customer's uid to its `hiddenFor` array, so
-  // it disappears from their history list while the order record stays
-  // saved (for the restaurant's own records).
   Future<void> _confirmDeleteOrder(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -395,15 +325,11 @@ class OrderHistoryDetailScreen extends StatelessWidget {
       'hiddenFor': FieldValue.arrayUnion([userId]),
     });
 
-    // Order is now hidden from the list — close this detail sheet too,
-    // since it no longer has anywhere to return to.
     if (context.mounted) Navigator.of(context).pop();
   }
 
-  // ── CANCEL (customer-initiated) ──
-  // Only reachable while _canCancelOrder is true, but we re-check the
-  // cutoff right before writing in case a few minutes passed between
-  // opening this confirmation dialog and tapping "Cancel Order".
+  // Cancel
+
   Future<void> _confirmCancelOrder(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -567,9 +493,6 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                         const SizedBox(width: 6),
                         _LiveTicker(
                           builder: (context) {
-                            // Orange while still possible to confirm by
-                            // uploading; red once the deadline has passed
-                            // and it's final.
                             final Color base = _isUploadWindowExpired
                                 ? const Color(0xFFC62828)
                                 : Colors.orange;
@@ -612,8 +535,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
             ),
           ),
 
-          // Delete only makes sense for past orders (delivered/cancelled)
-          // — active orders can't be deleted from here.
+          // Active orders can't be deleted from here.
           if (!_isActive)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
@@ -684,10 +606,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     );
   }
 
-  // Cancel / Receipt-upload / Track — these are order *actions*, so they
-  // now live right under the customer's own delivery details instead of
-  // under the price summary at the bottom. Pulled out of _buildBottomBar
-  // unchanged, just relocated.
+  // Cancel / Receipt-upload
   Widget _buildActionButtons(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -717,17 +636,12 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                       ),
                     ),
                   )
-                // Cancellation window has passed — hide this section
-                // entirely instead of explaining why, so the screen
-                // doesn't stay cluttered with an inactive notice.
                 : const SizedBox.shrink(),
           ),
 
         if (_needsReceiptUpload)
           _LiveTicker(
             builder: (context) {
-              // Inside the window: the upload button, with the deadline
-              // passed in so it also refuses a pick made after it closes.
               if (_canUploadReceiptNow) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 12),
@@ -739,8 +653,6 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                 );
               }
 
-              // Deadline passed with no receipt: no upload any more, and
-              // the outcome is stated plainly instead.
               if (_isUploadWindowExpired) {
                 return Container(
                   margin: const EdgeInsets.only(top: 12),
@@ -767,7 +679,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          "Not Confirmed — receipt wasn't uploaded in time.",
+                          "Not Confirmed - receipt wasn't uploaded in time.",
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
@@ -780,7 +692,6 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                 );
               }
 
-              // Window hasn't opened yet.
               return Container(
                 margin: const EdgeInsets.only(top: 12),
                 width: double.infinity,
@@ -891,6 +802,8 @@ class OrderHistoryDetailScreen extends StatelessWidget {
             child: Icon(
               _status == 'cancelled'
                   ? Icons.cancel_rounded
+                  : (_status == 'incomplete' || _status == 'undelivered')
+                  ? Icons.report_problem_rounded
                   : _status == 'delivered'
                   ? Icons.check_circle_rounded
                   : Icons.local_shipping_rounded,

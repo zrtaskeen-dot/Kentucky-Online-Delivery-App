@@ -522,8 +522,12 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     final profile = await _fetchProfileDefaults();
     final profilePhone = (profile?['phone'] as String?)?.trim();
     final profileAddress = (profile?['address'] as String?)?.trim();
-    final profileLat = (profile?['lat'] as num?)?.toDouble();
-    final profileLng = (profile?['lng'] as num?)?.toDouble();
+    // Fields are now "latitude"/"longitude". Fall back to the old
+    // "lat"/"lng" for users who haven't placed an order since the rename.
+    final profileLat =
+        ((profile?['latitude'] ?? profile?['lat']) as num?)?.toDouble();
+    final profileLng =
+        ((profile?['longitude'] ?? profile?['lng']) as num?)?.toDouble();
 
     final phoneDigits = (profilePhone != null && profilePhone.isNotEmpty)
         ? _localPhoneDigits(profilePhone)

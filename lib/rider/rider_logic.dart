@@ -72,6 +72,10 @@ class RiderController extends ChangeNotifier {
       case 'Delivered':
         body = 'Your order has been delivered. Enjoy your meal!';
         break;
+      case 'Undelivered':
+        body =
+            'We could not deliver your order. Please contact the restaurant for details.';
+        break;
       default:
         body = 'Your order status is now: $status';
     }
@@ -106,10 +110,7 @@ class RiderController extends ChangeNotifier {
     return FirebaseFirestore.instance
         .collection('orders')
         .where('riderId', isEqualTo: riderId)
-        .where(
-          'orderStatus',
-          whereIn: ['Accepted', 'Picked Up', 'On the Way'],
-        )
+        .where('orderStatus', whereIn: ['Accepted', 'Picked Up', 'On the Way'])
         .snapshots();
   }
 
@@ -172,21 +173,38 @@ class RiderController extends ChangeNotifier {
     _setError('');
 
     try {
-      await FirebaseFirestore.instance
-          .collection('orders')
-          .doc(orderId)
-          .update({
-            // Only ever write the camelCase field now. The stray
-            // 'order_status' (snake_case) some other part of the system
-            // writes is what caused a document to end up with two
-            // conflicting status fields — deleting it here cleans up any
-            // order the rider touches, on top of the one-time migration
-            // that cleans up everything else already in the database.
-            'orderStatus': 'Accepted',
-            'order_status': FieldValue.delete(),
-            'riderId': riderId,
-            'acceptedAt': FieldValue.serverTimestamp(),
-          });
+      // The rider's name and phone are copied onto the order, so the
+      // customer's tracking screen can show the name and call the rider
+      // without having to read the rider's profile.
+      String riderName = '';
+      String riderPhone = '';
+      try {
+        final riderDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(riderId)
+            .get();
+        riderName = (riderDoc.data()?['name'] ?? '').toString();
+        riderPhone = (riderDoc.data()?['phone'] ?? '').toString();
+      } catch (e) {
+        debugPrint('Could not read rider profile for the order: $e');
+      }
+
+      await FirebaseFirestore.instance.collection('orders').doc(orderId).update(
+        {
+          // Only ever write the camelCase field now. The stray
+          // 'order_status' (snake_case) some other part of the system
+          // writes is what caused a document to end up with two
+          // conflicting status fields — deleting it here cleans up any
+          // order the rider touches, on top of the one-time migration
+          // that cleans up everything else already in the database.
+          'orderStatus': 'Accepted',
+          'order_status': FieldValue.delete(),
+          'riderId': riderId,
+          if (riderName.isNotEmpty) 'riderName': riderName,
+          if (riderPhone.isNotEmpty) 'riderPhone': riderPhone,
+          'acceptedAt': FieldValue.serverTimestamp(),
+        },
+      );
 
       // In-app notification to the customer, with the rider's name.
       await _notifyCustomerOfStatus(
@@ -215,6 +233,40 @@ class RiderController extends ChangeNotifier {
   // "On the Way" as they like. Every "On the Way" order gets the rider's live
   // GPS location (see startLiveLocationTracking below); "Delivered" removes
   // just that one order from tracking.
+  // Status as stored on the order (same rule as resolveOrderStatus on the
+  // home screen).
+  String _statusOf(Map<String, dynamic>? data) {
+    final camel = (data?['orderStatus'] ?? '').toString();
+    final snake = (data?['order_status'] ?? '').toString();
+    if (snake.isNotEmpty && snake.toLowerCase() != 'pending') return snake;
+    if (camel.isNotEmpty && camel.toLowerCase() != 'pending') return camel;
+    return camel.isNotEmpty ? camel : snake;
+  }
+
+  bool _isFinalStatus(String status) {
+    final s = status.toLowerCase().trim();
+    return s == 'delivered' ||
+        s == 'undelivered' ||
+        s == 'cancelled' ||
+        s == 'canceled';
+  }
+
+  // Accepted -> On the Way -> Delivered. A final status never changes.
+  bool _canMove(String current, String target) {
+    final c = current.toLowerCase().trim();
+    switch (target) {
+      case 'On the Way':
+        return c == 'accepted' || c == 'picked up';
+      case 'Delivered':
+        return c == 'on the way' || c == 'picked up';
+      default:
+        return !_isFinalStatus(current);
+    }
+  }
+
+  // Reads the order's CURRENT status from Firestore and writes the new one in
+  // the same transaction, so a stale button or a double tap can never move an
+  // order backwards (e.g. Delivered -> anything else).
   Future<bool> updateOrderStatus(String orderId, String newStatus) async {
     _setLoading(true);
     _setError('');
@@ -223,38 +275,64 @@ class RiderController extends ChangeNotifier {
           .collection('orders')
           .doc(orderId);
 
-      // Read first so we know the riderId/customerId before writing.
-      final orderSnap = await orderRef.get();
-      final orderData = orderSnap.data();
-      final customerId =
-          (orderData?['customerId'] ?? orderData?['userId'] ?? '').toString();
+      String customerId = '';
+      String blockedBy = '';
 
-      await orderRef.update({
-        // Only the camelCase field from here on — see the comment in
-        // acceptOrder() above.
-        'orderStatus': newStatus,
-        'order_status': FieldValue.delete(),
-        'statusUpdatedAt': FieldValue.serverTimestamp(),
-      });
+      final String outcome = await FirebaseFirestore.instance
+          .runTransaction<String>((tx) async {
+            final snap = await tx.get(orderRef);
+            final data = snap.data();
+            if (data == null) return 'missing';
 
-      // Fire-and-forget: notifying the customer (and whatever network
-      // call that involves) should never hold up the rider's own
-      // confirmation. Awaiting this before returning was what caused a
-      // noticeable delay before the "Order marked as ..." message
-      // appeared on screen.
+            customerId = (data['customerId'] ?? data['userId'] ?? '')
+                .toString();
+            final current = _statusOf(data);
+
+            if (current == newStatus) return 'same'; // already done
+            if (!_canMove(current, newStatus)) {
+              blockedBy = current;
+              return 'blocked';
+            }
+
+            tx.update(orderRef, {
+              'orderStatus': newStatus,
+              'order_status': FieldValue.delete(),
+              'statusUpdatedAt': FieldValue.serverTimestamp(),
+            });
+            return 'applied';
+          });
+
+      if (outcome == 'missing') {
+        _setError('Order not found');
+        _setLoading(false);
+        return false;
+      }
+      if (outcome == 'blocked') {
+        _setError(
+          _isFinalStatus(blockedBy)
+              ? 'Order is already $blockedBy'
+              : 'Order must be On the Way first',
+        );
+        _setLoading(false);
+        return false;
+      }
+      if (outcome == 'same') {
+        _setLoading(false);
+        return true; // nothing to do, no second notification
+      }
+
+      // Fire-and-forget: the customer notification must never delay the
+      // rider's own confirmation.
       _notifyCustomerOfStatus(
         customerId: customerId,
         status: newStatus,
       ).catchError((e) => debugPrint('Error notifying customer: $e'));
 
       if (newStatus == 'On the Way') {
-        // This order is now eligible for live tracking — the rider's GPS
-        // location is written to it (together with any other On the Way
-        // orders) until it is delivered.
+        // Live location is written to this order until it is delivered.
         startLiveLocationTracking(orderId);
       } else if (newStatus == 'Delivered') {
-        // Only this order stops being tracked; other On the Way orders keep
-        // receiving the live location.
+        // Only this order stops being tracked.
         stopTrackingOrder(orderId);
       }
 
@@ -264,6 +342,92 @@ class RiderController extends ChangeNotifier {
     } catch (e) {
       _setError(e.toString());
       debugPrint('Error updating order status: $e');
+      _setLoading(false);
+      return false;
+    }
+  }
+
+  // 4c. Mark an order as Undelivered (the rider could not hand it over).
+  // Saves WHY (picked by the rider from a list) so the manager can see it:
+  //   orderStatus        -> 'Undelivered'
+  //   undeliveredReason  -> the reason the rider selected
+  //   undeliveredNote    -> free text, only when the reason is "Other"
+  //   undeliveredAt      -> when
+  // Live tracking of this order stops. Returns true on success.
+  Future<bool> markUndelivered(
+    String orderId,
+    String reason, {
+    String note = '',
+  }) async {
+    _setLoading(true);
+    _setError('');
+    try {
+      final orderRef = FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId);
+
+      String customerId = '';
+      String blockedBy = '';
+
+      // Only an order that is still open (Accepted / On the Way) can become
+      // Undelivered; a Delivered or Cancelled order can never be changed.
+      final String outcome = await FirebaseFirestore.instance
+          .runTransaction<String>((tx) async {
+            final snap = await tx.get(orderRef);
+            final data = snap.data();
+            if (data == null) return 'missing';
+
+            customerId = (data['customerId'] ?? data['userId'] ?? '')
+                .toString();
+            final current = _statusOf(data);
+            final c = current.toLowerCase().trim();
+
+            if (c == 'undelivered') return 'same'; // already saved
+            if (c != 'accepted' && c != 'on the way' && c != 'picked up') {
+              blockedBy = current;
+              return 'blocked';
+            }
+
+            tx.update(orderRef, {
+              'orderStatus': 'Undelivered',
+              'order_status': FieldValue.delete(),
+              'undeliveredReason': reason,
+              if (note.trim().isNotEmpty) 'undeliveredNote': note.trim(),
+              'undeliveredAt': FieldValue.serverTimestamp(),
+              'statusUpdatedAt': FieldValue.serverTimestamp(),
+            });
+            return 'applied';
+          });
+
+      if (outcome == 'missing') {
+        _setError('Order not found');
+        _setLoading(false);
+        return false;
+      }
+      if (outcome == 'blocked') {
+        _setError('Order is already $blockedBy');
+        _setLoading(false);
+        return false;
+      }
+      if (outcome == 'same') {
+        _setLoading(false);
+        return true;
+      }
+
+      _notifyCustomerOfStatus(
+        customerId: customerId,
+        status: 'Undelivered',
+      ).catchError((e) => debugPrint('Error notifying customer: $e'));
+
+      // No more live location for this order.
+      stopTrackingOrder(orderId);
+
+      debugPrint('Order $orderId marked Undelivered: $reason');
+      _setLoading(false);
+      return true;
+    } catch (e) {
+      _setError(e.toString());
+      debugPrint('Error marking order undelivered: $e');
       _setLoading(false);
       return false;
     }
@@ -445,13 +609,10 @@ class RiderController extends ChangeNotifier {
       _positionStreamSubscription =
           Geolocator.getPositionStream(
             locationSettings: _backgroundLocationSettings(),
-          ).listen(
-            (Position position) {
-              if (!isReliableRiderFix(position)) return; // skip weak GPS
-              _onNewPosition(position);
-            },
-            onError: (e) => debugPrint('Location stream error: $e'),
-          );
+          ).listen((Position position) {
+            if (!isReliableRiderFix(position)) return; // skip weak GPS
+            _onNewPosition(position);
+          }, onError: (e) => debugPrint('Location stream error: $e'));
 
       // The stream has a 3 m distanceFilter, so it stays silent until the
       // rider moves. Take one reading right now (with a time limit and a
@@ -532,15 +693,7 @@ class RiderController extends ChangeNotifier {
     FirebaseFirestore.instance
         .collection('orders')
         .doc(orderId)
-        .update({
-          'riderLat': position.latitude,
-          'riderLng': position.longitude,
-          // Diagnostics: GPS accuracy in meters, and whether the phone says the
-          // position is fake (mock-location app / emulator).
-          'riderAccuracy': position.accuracy,
-          'riderMocked': position.isMocked,
-          'lastLocationUpdate': FieldValue.serverTimestamp(),
-        })
+        .update({'riderLat': position.latitude, 'riderLng': position.longitude})
         .catchError((e) {
           debugPrint('Error updating live location for $orderId: $e');
         });

@@ -48,11 +48,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String get _currentUserId =>
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
-  // Master list: only fixes the ORDER and display NAMES of the tabs.
-  // A tab is shown only when the selected branch has at least one item in
-  // that category (see _buildVisibleCategories). "ALL" and "SMART COMBO"
-  // are always shown. Categories found in the menu that are not listed
-  // here are added automatically as extra tabs.
   static const List<String> _baseCategories = [
     "PIZZA",
     "BURGER",
@@ -65,7 +60,6 @@ class _HomeScreenState extends State<HomeScreen> {
     "COMBO",
   ];
 
-  // Tabs actually shown. Rebuilt every time the menu is fetched.
   List<String> categories = ["ALL", "SMART COMBO"];
 
   @override
@@ -179,10 +173,315 @@ class _HomeScreenState extends State<HomeScreen> {
     return raw.toUpperCase().trim().replaceAll(RegExp(r'[^A-Z0-9]'), '');
   }
 
+  // BEST SELLING
+
+  String _bestKey(dynamic name) => (name ?? '').toString().toLowerCase().trim();
+
+  bool _isBestSeller(FoodItem item) =>
+      _bestSellingBranchId == selectedBranchId &&
+      _bestSelling.any((e) => _bestKey(e.item.name) == _bestKey(item.name));
+
+  static const int _bestMinSold = 10;
+  static const int _bestMaxItems = 5;
+  static const Duration _bestCacheTtl = Duration(minutes: 10);
+  static const String _orderBranchField = 'branchId';
+
+  final Map<String, Map<String, int>> _soldByBranch = {};
+  final Map<String, DateTime> _soldFetchedAt = {};
+
+  List<_BestSellerEntry> _bestSelling = [];
+  String? _bestSellingBranchId;
+
+  bool _isCountableDelivered(Map<String, dynamic> data) {
+    String norm(dynamic v) => (v ?? '').toString().toLowerCase().trim();
+    final a = norm(data['orderStatus']);
+    final b = norm(data['order_status']);
+    const excluded = {'cancelled', 'canceled', 'rejected', 'undelivered'};
+    if (excluded.contains(a) || excluded.contains(b)) return false;
+    return a == 'delivered' || b == 'delivered';
+  }
+
+  Future<Map<String, int>> _countDeliveredSales(String branchId) async {
+    final orders = FirebaseFirestore.instance.collection('orders');
+
+    Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> run(
+      String statusField,
+    ) async {
+      try {
+        final snap = await orders
+            .where(_orderBranchField, isEqualTo: branchId)
+            .where(statusField, isEqualTo: 'Delivered')
+            .get();
+        return snap.docs;
+      } catch (e) {
+        debugPrint('best selling query ($statusField) error: $e');
+        return [];
+      }
+    }
+
+    final results = await Future.wait([
+      run('orderStatus'),
+      run('order_status'),
+    ]);
+
+    final counted = <String>{};
+    final sold = <String, int>{};
+
+    for (final docs in results) {
+      for (final doc in docs) {
+        if (!counted.add(doc.id)) continue; // never count an order twice
+        final data = doc.data();
+        if (!_isCountableDelivered(data)) continue;
+
+        final items = data['items'];
+        if (items is! List) continue;
+        for (final line in items) {
+          if (line is! Map) continue;
+          final key = _bestKey(
+            line['name'] ?? line['itemName'] ?? line['title'],
+          );
+          if (key.isEmpty) continue;
+          final rawQty = line['quantity'] ?? line['qty'] ?? line['count'] ?? 1;
+          final qty = rawQty is num
+              ? rawQty.toInt()
+              : (int.tryParse('$rawQty') ?? 1);
+          if (qty <= 0) continue;
+          sold[key] = (sold[key] ?? 0) + qty;
+        }
+      }
+    }
+    return sold;
+  }
+
+  List<_BestSellerEntry> _rankBestSelling(
+    Map<String, int> sold,
+    List<FoodItem> menu,
+  ) {
+    final seen = <String>{};
+    final entries = <_BestSellerEntry>[];
+    for (final item in menu) {
+      final key = _bestKey(item.name);
+      if (!seen.add(key)) continue;
+      final n = sold[key] ?? 0;
+      if (n >= _bestMinSold) entries.add(_BestSellerEntry(item, n));
+    }
+    entries.sort((a, b) {
+      final c = b.sold.compareTo(a.sold);
+      return c != 0 ? c : a.item.name.compareTo(b.item.name);
+    });
+    return entries.take(_bestMaxItems).toList();
+  }
+
+  Future<void> _loadBestSelling(String branchId, List<FoodItem> menu) async {
+    try {
+      var sold = _soldByBranch[branchId];
+      final fetchedAt = _soldFetchedAt[branchId];
+      if (sold == null ||
+          fetchedAt == null ||
+          DateTime.now().difference(fetchedAt) > _bestCacheTtl) {
+        sold = await _countDeliveredSales(branchId);
+        _soldByBranch[branchId] = sold;
+        _soldFetchedAt[branchId] = DateTime.now();
+      }
+      final entries = _rankBestSelling(sold, menu);
+      if (!mounted || selectedBranchId != branchId) return;
+      setState(() {
+        _bestSelling = entries;
+        _bestSellingBranchId = branchId;
+      });
+    } catch (e) {
+      debugPrint('loadBestSelling error: $e');
+      if (!mounted || selectedBranchId != branchId) return;
+      setState(() {
+        _bestSelling = [];
+        _bestSellingBranchId = branchId;
+      });
+    }
+  }
+
+  void _openFoodItem(FoodItem item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => item.category.toUpperCase() == 'PIZZA'
+            ? PizzaDetailScreen(
+                item: item,
+                selectedBranchId: selectedBranchId ?? '',
+              )
+            : FoodDetailScreen(
+                item: item,
+                selectedBranchId: selectedBranchId ?? '',
+              ),
+      ),
+    );
+  }
+
+  Widget _buildBestSellingSection() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.local_fire_department_rounded,
+                  color: primary,
+                  size: 22,
+                ),
+                const SizedBox(width: 6),
+                _sectionTitle('Best Selling'),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 200,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _bestSelling.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) =>
+                  _buildBestSellingCard(_bestSelling[i], i + 1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBestSellingCard(_BestSellerEntry entry, int rank) {
+    final item = entry.item;
+    final placeholder = Container(
+      color: Colors.orange.shade50,
+      child: const Icon(Icons.fastfood_rounded, size: 40, color: primary),
+    );
+
+    return GestureDetector(
+      onTap: () => _openFoodItem(item),
+      child: Container(
+        width: 150,
+        decoration: BoxDecoration(
+          color: itemCardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: lightMaroonBorder, width: 1),
+          boxShadow: const [
+            BoxShadow(
+              color: Color.fromRGBO(0, 0, 0, 0.04),
+              blurRadius: 8,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 5,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(19),
+                      ),
+                      child: item.imageUrl.isEmpty
+                          ? placeholder
+                          : Image.network(
+                              item.imageUrl,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => placeholder,
+                            ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: maroon,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '#$rank',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      item.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                        color: Colors.black87,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      _formatPrice(item),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: primary,
+                        fontSize: 12,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.local_fire_department_rounded,
+                          size: 13,
+                          color: Colors.grey[600],
+                        ),
+                        const SizedBox(width: 3),
+                        Text(
+                          '${entry.sold} sold',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   bool _isNewItem(FoodItem item) {
     if (item.createdAt == null) return false;
     return DateTime.now().difference(item.createdAt!) <=
-        const Duration(days: 7);
+        const Duration(days: 3);
   }
 
   bool _categoryMatches(String itemCategory, String tabCategory) {
@@ -198,8 +497,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return false;
   }
 
-  // Builds the category tabs from the items that really exist, so a
-  // category with no items (e.g. PIZZA) is hidden automatically.
   List<String> _buildVisibleCategories(List<FoodItem> items) {
     final visible = <String>['ALL'];
 
@@ -209,7 +506,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Categories present in the menu but missing from _baseCategories.
     final extraKeys = <String>{};
     for (final item in items) {
       final raw = item.category.trim();
@@ -336,8 +632,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return b.createdAt!.compareTo(a.createdAt!);
         });
 
-        // Rebuild tabs from the fetched items; keep the current tab if it
-        // still exists, otherwise fall back to ALL.
         final previouslySelected = selectedCategoryIndex < categories.length
             ? categories[selectedCategoryIndex]
             : 'ALL';
@@ -347,6 +641,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
         isLoadingItems = false;
       });
+
+      unawaited(_loadBestSelling(branchId, allItems));
     } catch (e) {
       debugPrint('fetchMenuItems error: $e');
       setState(() => isLoadingItems = false);
@@ -400,10 +696,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Pull-down to refresh: reloads the menu of the selected branch.
   Future<void> _refreshMenu() async {
     final branchId = selectedBranchId;
     if (branchId == null) return;
+    _soldByBranch.remove(branchId);
+    _soldFetchedAt.remove(branchId);
     await _fetchMenuItems(branchId);
   }
 
@@ -435,8 +732,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: primary,
                 onRefresh: _refreshMenu,
                 child: CustomScrollView(
-                  // AlwaysScrollable: pull-to-refresh works even when the
-                  // content is shorter than the screen.
                   physics: const BouncingScrollPhysics(
                     parent: AlwaysScrollableScrollPhysics(),
                   ),
@@ -456,6 +751,12 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: OfferSlider(branchId: selectedBranchId ?? ''),
                         ),
                       ),
+                    if (!isSearching &&
+                        selectedCategoryIndex == 0 &&
+                        !isLoadingItems &&
+                        _bestSellingBranchId == selectedBranchId &&
+                        _bestSelling.isNotEmpty)
+                      SliverToBoxAdapter(child: _buildBestSellingSection()),
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
@@ -572,10 +873,7 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: lightMaroonBorder,
-            width: 1,
-          ), // Very light maroon border
+          border: Border.all(color: lightMaroonBorder, width: 1),
           boxShadow: const [
             BoxShadow(
               color: Color.fromRGBO(0, 0, 0, 0.03),
@@ -589,12 +887,12 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: primary.withValues(alpha: 0.1),
+                color: maroon.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
                 Icons.storefront_rounded,
-                color: primary,
+                color: maroon,
                 size: 18,
               ),
             ),
@@ -625,7 +923,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            const Icon(Icons.keyboard_arrow_down_rounded, color: primary),
+            const Icon(Icons.keyboard_arrow_down_rounded, color: maroon),
           ],
         ),
       ),
@@ -709,11 +1007,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? primary.withValues(alpha: 0.08)
+                                  ? maroon.withValues(alpha: 0.08)
                                   : itemCardColor,
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: isSelected ? primary : lightMaroonBorder,
+                                color: isSelected ? maroon : lightMaroonBorder,
                                 width: isSelected ? 1.5 : 1,
                               ),
                             ),
@@ -723,13 +1021,13 @@ class _HomeScreenState extends State<HomeScreen> {
                                   padding: const EdgeInsets.all(9),
                                   decoration: BoxDecoration(
                                     color: isSelected
-                                        ? primary
-                                        : primary.withValues(alpha: 0.1),
+                                        ? maroon
+                                        : maroon.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Icon(
                                     Icons.storefront_rounded,
-                                    color: isSelected ? Colors.white : primary,
+                                    color: isSelected ? Colors.white : maroon,
                                     size: 18,
                                   ),
                                 ),
@@ -745,7 +1043,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           fontSize: 14,
                                           fontWeight: FontWeight.w800,
                                           color: isSelected
-                                              ? primary
+                                              ? maroon
                                               : Colors.black87,
                                         ),
                                         maxLines: 1,
@@ -767,7 +1065,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 if (isSelected)
                                   const Icon(
                                     Icons.check_circle_rounded,
-                                    color: primary,
+                                    color: maroon,
                                     size: 20,
                                   ),
                               ],
@@ -788,26 +1086,31 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildCartIcon() {
-    Query<Map<String, dynamic>> cartQuery = FirebaseFirestore.instance
+    final Query<Map<String, dynamic>> cartQuery = FirebaseFirestore.instance
         .collection('carts')
         .where('userId', isEqualTo: _currentUserId);
-    if (selectedBranchId != null && selectedBranchId!.isNotEmpty) {
-      cartQuery = cartQuery.where('branchId', isEqualTo: selectedBranchId);
-    }
 
     return StreamBuilder<QuerySnapshot>(
       stream: cartQuery.snapshots(),
       builder: (context, snapshot) {
-        int liveCount = snapshot.hasData ? snapshot.data!.docs.length : 0;
+        int liveCount = 0;
+        if (snapshot.hasData) {
+          liveCount = CartService.linesFromDocs(snapshot.data!.docs).where((
+            line,
+          ) {
+            final b = (line.data['branchId'] ?? '').toString();
+            return selectedBranchId == null ||
+                selectedBranchId!.isEmpty ||
+                b.isEmpty ||
+                b == selectedBranchId;
+          }).length;
+        }
 
         return Container(
           decoration: BoxDecoration(
             color: itemCardColor,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: lightMaroonBorder,
-              width: 1,
-            ), // Light maroon border
+            border: Border.all(color: lightMaroonBorder, width: 1),
             boxShadow: const [
               BoxShadow(
                 color: Color.fromRGBO(0, 0, 0, 0.03),
@@ -822,7 +1125,7 @@ class _HomeScreenState extends State<HomeScreen> {
               IconButton(
                 icon: const Icon(
                   Icons.shopping_cart_rounded,
-                  color: primary,
+                  color: maroon,
                   size: 26,
                 ),
                 onPressed: () => Navigator.push(
@@ -836,9 +1139,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   top: 6,
                   child: Container(
                     padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: primary,
+
+                    decoration: BoxDecoration(
+                      color: maroon,
                       shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1.5),
                     ),
                     constraints: const BoxConstraints(
                       minWidth: 16,
@@ -867,10 +1172,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: lightMaroonBorder,
-          width: 1,
-        ), // Light maroon border
+        border: Border.all(color: lightMaroonBorder, width: 1),
         boxShadow: const [
           BoxShadow(
             color: Color.fromRGBO(0, 0, 0, 0.03),
@@ -957,9 +1259,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: isSelected ? null : Colors.white,
                 borderRadius: BorderRadius.circular(22),
                 border: Border.all(
-                  color: isSelected
-                      ? Colors.transparent
-                      : lightMaroonBorder, // Light maroon border for unselected
+                  color: isSelected ? Colors.transparent : lightMaroonBorder,
                   width: 1,
                 ),
                 boxShadow: isSelected
@@ -1022,11 +1322,7 @@ class _HomeScreenState extends State<HomeScreen> {
         decoration: BoxDecoration(
           color: itemCardColor,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color:
-                lightMaroonBorder, // Light maroon border for food card distinction
-            width: 1,
-          ),
+          border: Border.all(color: lightMaroonBorder, width: 1),
           boxShadow: const [
             BoxShadow(
               color: Color.fromRGBO(0, 0, 0, 0.04),
@@ -1168,6 +1464,48 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
+            if (_isBestSeller(item))
+              Positioned(
+                top: _isNewItem(item) ? 34 : 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF8A00),
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFFF8A00).withValues(alpha: 0.3),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.local_fire_department_rounded,
+                        color: Colors.white,
+                        size: 12,
+                      ),
+                      SizedBox(width: 3),
+                      Text(
+                        'BEST SELLING',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -1248,4 +1586,10 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+class _BestSellerEntry {
+  final FoodItem item;
+  final int sold;
+  const _BestSellerEntry(this.item, this.sold);
 }

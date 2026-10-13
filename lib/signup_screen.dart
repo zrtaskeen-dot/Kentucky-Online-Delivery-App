@@ -6,11 +6,10 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import 'login_screen.dart';
 import 'main_navigation.dart';
-import 'fcm_service.dart'; // 👈 ADDED
+import 'fcm_service.dart'; 
 
-// Capitalizes the first letter of every word as the user types (e.g.
-// "ali khan" -> "Ali Khan"), and lower-cases the rest of that word.
-// Keeps the cursor exactly where it was.
+// Capitalizes the first letter of every word as the user types
+
 class CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -43,7 +42,7 @@ class CapitalizeWordsFormatter extends TextInputFormatter {
 }
 
 class SignUpScreen extends StatefulWidget {
-  final String role; // 'customer' or 'rider'
+  final String role; 
 
   const SignUpScreen({super.key, required this.role});
 
@@ -62,14 +61,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
 
-  // ── Theme ──
+ 
   static const Color bgColor = Colors.white;
   static const Color themeColor = Color(0xFFA70000);
   static const Color creamColor = Colors.white;
   static const Color fieldColor = Color(0xFFFFFDFA);
 
-  // Success/error message card colors — border, light fill, and text
-  // all in the same hue so the card reads as one clear signal.
+ 
   static const Color successBorder = Color(0xFF4A7C59);
   static const Color successBg = Color(0xFFEAF3ED);
   static const Color successText = Color(0xFF2F5B3E);
@@ -113,10 +111,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return null;
   }
 
-  // Firebase's raw error messages are long, technical, and English-legal
-  // sounding (e.g. "The email address is already in use by another
-  // account."). This maps the common ones to short, plain messages that
-  // fit on a single snackbar line instead of getting cut off.
   String _authErrorMessage(FirebaseAuthException e) {
     switch (e.code) {
       case 'email-already-in-use':
@@ -136,9 +130,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  // Success messages get a green-bordered/light-green/green-text card;
-  // error messages get the same treatment in red. isError defaults to
-  // true since most call sites here are reporting a failure.
   void _showSnack(String msg, {bool isError = true}) {
     if (!mounted) return;
     final borderColor = isError ? errorBorder : successBorder;
@@ -163,10 +154,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
           child: Text(
             msg,
             textAlign: TextAlign.center,
-            // Was maxLines: 1 with an ellipsis, which cut longer messages
-            // off mid-sentence. Messages are now kept short at the
-            // source (see _authErrorMessage), and this allows up to 3
-            // lines so nothing gets truncated even if one runs long.
             maxLines: 3,
             overflow: TextOverflow.visible,
             style: TextStyle(
@@ -180,9 +167,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     );
   }
 
-  // ────────────────────────────────────────────────────────────
-  // GUEST FLOW — anonymous Firebase login + cart migration
-  // ────────────────────────────────────────────────────────────
+
+  // GUEST FLOW 
 
   Future<void> _continueAsGuest() async {
     setState(() => _isLoading = true);
@@ -264,11 +250,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await credential.user!.sendEmailVerification();
       await credential.user!.updateDisplayName(_nameController.text.trim());
 
-      // 👈 ADDED: save the customer's profile in Firestore (users/{uid}).
-      // Before this, only the Auth profile got the name, and Firestore
-      // ended up with just fcmToken + emailVerified, so name/email/roleId
-      // were missing. merge:true keeps the FCM token write (and the
-      // emailVerified update done at login) from overwriting each other.
+      
       await FirebaseFirestore.instance
           .collection('users')
           .doc(credential.user!.uid)
@@ -284,8 +266,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
         await _migrateGuestCart(guestUid, credential.user!.uid);
       }
 
-      // 👈 ADDED: save this device's FCM token right after account
-      // creation, same as the login flow.
+      // Save FCM token right after account  creation
+     
       await FcmService.syncDeviceToken(credential.user!.uid);
       await FirebaseAuth.instance.signOut();
 
@@ -308,8 +290,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
     }
   }
 
-  // ────────────────────────────────────────────────────────────
-  // GOOGLE SIGN-UP — mirror image of the login page's Google flow.
+  
+  // GOOGLE SIGN-UP 
 
   Future<void> _signUpWithGoogle() async {
     setState(() => _isLoading = true);
@@ -347,9 +329,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
       final docSnap = await userDoc.get();
 
       if (docSnap.exists) {
-        // Already has an account — don't silently log them in from the
-        // sign-up screen. Back the Google session out and send them to
-        // log in instead.
         await FirebaseAuth.instance.signOut();
         await GoogleSignIn().signOut();
         if (!mounted) return;
@@ -360,15 +339,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
       await userDoc.set({
         'name': user.displayName ?? '',
         'email': user.email ?? '',
-        // ✅ FIXED: Firestore mein field ka asal naam "roleId" hai
-        // (chhota d), "roleID" nahi — pehle yeh galat naam likha ja
-        // raha tha, isliye login screen (jo roleId check karta hai)
-        // is user ko rider/customer tasleem nahi karta tha.
         'roleId': roleMap[widget.role],
         'createdAt': FieldValue.serverTimestamp(),
-        // Google already verifies the email address, so there's no
-        // separate email-verification step to wait on like there is
-        // for the email/password sign-up path above.
         'emailVerified': true,
       });
 
@@ -509,8 +481,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         ),
                       ),
 
-                      // Google sign-up is a customer-only shortcut, same
-                      // as the login page's Google button.
+                      
                       if (widget.role != 'rider') ...[
                         const SizedBox(height: 24),
                         _buildDivider(),

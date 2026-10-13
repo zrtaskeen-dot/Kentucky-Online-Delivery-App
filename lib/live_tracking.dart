@@ -73,7 +73,31 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     }
   }
 
-  Future<void> _callRider(BuildContext context, String? phone) async {
+  Future<void> _callRider(
+    BuildContext context,
+    String? riderId,
+    String? savedPhone,
+  ) async {
+    // The order stores the rider's id. Their number is read from that rider's
+    // own profile (users/{riderId}.phone) — NOT from the order's `phone`,
+    // which is the customer's number. A phone copied onto the order when the
+    // rider accepted it (riderPhone) is only the fallback.
+    String? phone;
+    if (riderId != null && riderId.isNotEmpty) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(riderId)
+            .get();
+        phone = (doc.data()?['phone'] ?? '').toString().trim();
+      } catch (e) {
+        debugPrint('Could not read rider phone: $e');
+      }
+    }
+    if (phone == null || phone.isEmpty) phone = savedPhone;
+
+    if (!context.mounted) return;
+
     if (phone == null || phone.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -193,9 +217,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           final double? destLat = (data['latitude'] as num?)?.toDouble();
           final double? destLng = (data['longitude'] as num?)?.toDouble();
 
-          final String riderName = data['riderName'] ?? 'Rider';
-          final String? riderPhone =
-              (data['riderPhone'] ?? data['phone_number']) as String?;
+          final String riderName = (data['riderName'] ?? 'Rider').toString();
+          // The rider's phone is saved on the order when the rider accepts it
+          // (RiderController.acceptOrder). NOTE: 'phone_number' on an order is
+          // the CUSTOMER's own number, so it must never be used for the rider.
+          final String? riderPhone = data['riderPhone']?.toString();
+          final String? riderId = data['riderId']?.toString();
 
           final bool hasRiderLocation = riderLat != null && riderLng != null;
           final bool hasDestination = destLat != null && destLng != null;
@@ -290,25 +317,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           ),
                       },
                     ),
-                    // Re-fit button: shows both rider and delivery address again.
-                    Positioned(
-                      right: 12,
-                      bottom: 12,
-                      child: FloatingActionButton.small(
-                        heroTag: 'recenter_tracking',
-                        backgroundColor: Colors.white,
-                        onPressed: () {
-                          final r = _lastRiderLatLng;
-                          if (r != null) {
-                            _fitTwoPinsOnScreen(r, _lastDestLatLng);
-                          }
-                        },
-                        child: const Icon(
-                          Icons.center_focus_strong_rounded,
-                          color: primary,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -378,7 +386,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         ),
                       ),
                       InkWell(
-                        onTap: () => _callRider(context, riderPhone),
+                        onTap: () => _callRider(context, riderId, riderPhone),
                         borderRadius: BorderRadius.circular(50),
                         child: Container(
                           padding: const EdgeInsets.all(12),

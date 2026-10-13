@@ -7,7 +7,6 @@ import 'page3.dart';
 class OnboardPage1 extends StatelessWidget {
   const OnboardPage1({super.key});
 
-  
   static const primary = Color(0xFFA70000);
   static const accentOrange = Color(0xFFFF8A00);
   static const ink = Color(0xFF2B1010);
@@ -26,13 +25,13 @@ class OnboardPage1 extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-             
               Row(
                 children: [
                   Expanded(child: _buildOnboardProgressBar(0)),
                   const SizedBox(width: 16),
                   TextButton(
-                    onPressed: () => _skipOnboardingTo(context, const OnboardPage3()),
+                    onPressed: () =>
+                        _skipOnboardingTo(context, const OnboardPage3()),
                     style: TextButton.styleFrom(
                       foregroundColor: muted,
                       padding: EdgeInsets.zero,
@@ -41,7 +40,10 @@ class OnboardPage1 extends StatelessWidget {
                     ),
                     child: const Text(
                       "Skip",
-                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],
@@ -57,8 +59,14 @@ class OnboardPage1 extends StatelessWidget {
                     letterSpacing: -0.5,
                   ),
                   children: [
-                    TextSpan(text: "Plan your cravings,\n", style: TextStyle(color: ink)),
-                    TextSpan(text: "schedule for later", style: TextStyle(color: primary)),
+                    TextSpan(
+                      text: "Plan your cravings,\n",
+                      style: TextStyle(color: ink),
+                    ),
+                    TextSpan(
+                      text: "schedule for later",
+                      style: TextStyle(color: primary),
+                    ),
                   ],
                 ),
               ),
@@ -113,7 +121,7 @@ class OnboardPage1 extends StatelessWidget {
                       context,
                       MaterialPageRoute(builder: (_) => const OnboardPage2()),
                     );
-                  }, 
+                  },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: accentOrange,
                     foregroundColor: Colors.white,
@@ -121,14 +129,16 @@ class OnboardPage1 extends StatelessWidget {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(30),
                     ),
-                              
-                                    ),
+                  ),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
                         "Next",
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                       SizedBox(width: 8),
                       Icon(Icons.arrow_forward_rounded, size: 20),
@@ -144,7 +154,6 @@ class OnboardPage1 extends StatelessWidget {
   }
 }
 
-
 const _onboardPrimary = Color(0xFFA70000);
 const _onboardOrange = Color(0xFFFF8A00);
 
@@ -152,14 +161,9 @@ Future<void> _skipOnboardingTo(BuildContext context, Widget page) async {
   final prefs = await SharedPreferences.getInstance();
   await prefs.setBool('has_seen_onboarding', true);
   if (!context.mounted) return;
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(builder: (_) => page),
-  );
+  Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => page));
 }
 
-// Segmented top progress bar — replaces the small dot row with the
-// thin 3-bar style from the reference design.
 Widget _buildOnboardProgressBar(int activeIndex) {
   return Row(
     children: List.generate(3, (i) {
@@ -179,7 +183,6 @@ Widget _buildOnboardProgressBar(int activeIndex) {
   );
 }
 
-// Small feature callout pill, e.g. "New: schedule meals ahead of time".
 Widget _buildOnboardChip({required IconData icon, required String text}) {
   return Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -208,7 +211,6 @@ Widget _buildOnboardChip({required IconData icon, required String text}) {
   );
 }
 
-// Small floating circular icon bubble overlaid on the hero image.
 Widget _buildOnboardIconBadge({
   required IconData icon,
   required Color bg,
@@ -233,10 +235,10 @@ Widget _buildOnboardIconBadge({
   );
 }
 
-// Circular hero image with dashed decorative rings behind it and small
-// floating icon badges overlaid on top — the centerpiece composition
-// from the reference design.
-Widget _buildOnboardHero({required String imageUrl, required List<Widget> badges}) {
+Widget _buildOnboardHero({
+  required String imageUrl,
+  required List<Widget> badges,
+}) {
   return LayoutBuilder(
     builder: (context, constraints) {
       final double side = math.min(constraints.maxWidth, constraints.maxHeight);
@@ -277,11 +279,6 @@ Widget _buildOnboardHero({required String imageUrl, required List<Widget> badges
                   ],
                 ),
                 child: ClipOval(
-                  // 👈 FIX: BoxFit.cover was cropping the image to fill
-                  // the circle — cutting off parts of the pizza/rider
-                  // art whenever the source image wasn't a perfectly
-                  // centered square. BoxFit.contain shows the whole
-                  // image, letterboxed inside the circle instead of cut.
                   child: Image.network(imageUrl, fit: BoxFit.contain),
                 ),
               ),

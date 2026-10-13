@@ -1,8 +1,3 @@
-// Shared "Upload Receipt" button used by both order_detail.dart (right
-// after placing a scheduled Online order) and order_history_detail.dart
-// (when revisiting that order later from order history). Handles the
-// whole flow: pick image -> OCR-verify it's a real EasyPaisa/JazzCash
-// receipt -> upload to Cloudinary -> save the URL on the order doc.
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,18 +17,8 @@ class ReceiptUploadButton extends StatefulWidget {
   });
 
   final String orderId;
-
-  /// The online payment provider for this order — "EasyPaisa" or
-  /// "JazzCash" — used both for OCR verification and as the Cloudinary tag.
   final String provider;
-
-  /// Optional callback fired after the receipt is successfully saved,
-  /// in case the parent screen wants to refresh itself.
   final VoidCallback? onUploaded;
-
-  /// Optional cutoff (a scheduled order's delivery time). If set, an upload
-  /// attempted at or after this moment is refused — so a receipt can't
-  /// slip through if the screen was left open past the deadline.
   final DateTime? deadline;
 
   @override
@@ -49,17 +34,10 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
   final ImagePicker _picker = ImagePicker();
   bool _isUploading = false;
   bool _uploaded = false;
-
-  // Shown as a banner directly above the button/status box instead of a
-  // bottom SnackBar — a SnackBar disappears in a couple of seconds and
-  // shows at the very bottom of the screen, disconnected from the button
-  // that triggered it, which is why "Invalid screenshot" was easy to miss.
-  // This stays visible until the next attempt.
   String? _bannerMessage;
   bool _bannerIsError = true;
 
-  // Same success/error color scheme as login_screen.dart, so this reads
-  // the same way everywhere in the app.
+  
   static const Color _successBorder = Color(0xFF4A7C59);
   static const Color _successBg = Color(0xFFEAF3ED);
   static const Color _successText = Color(0xFF2F5B3E);
@@ -67,19 +45,8 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
   static const Color _errorBg = Color(0xFFFDECEA);
   static const Color _errorText = Color(0xFFB71C1C);
 
-  // Same OCR check used at checkout in delivery_type.dart — confirms
-  // the screenshot actually mentions a real payment provider before we
-  // accept it as a valid receipt.
-  //
-  // Deliver Now passes a specific provider ("EasyPaisa" or "JazzCash")
-  // since the customer picks one upfront, so we check for that one
-  // provider's text. Deliver Later combines both into a single "Online
-  // Payment" option with no provider picked in advance — for that case
-  // we accept a receipt that matches EITHER provider, instead of
-  // skipping the check entirely (which is what happened before: since
-  // widget.provider was never literally "EasyPaisa" or "JazzCash" here,
-  // the old code fell through to `return true` and never actually
-  // verified anything for scheduled orders).
+  // OCR check
+  
   Future<bool> _verifyReceipt(File file) async {
     final inputImage = InputImage.fromFile(file);
     final textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
@@ -100,8 +67,7 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
       if (widget.provider == 'EasyPaisa') return looksLikeEasyPaisa;
       if (widget.provider == 'JazzCash') return looksLikeJazzCash;
 
-      // Generic "Online Payment" (Deliver Later) — either provider's
-      // receipt is valid.
+      
       return looksLikeEasyPaisa || looksLikeJazzCash;
     } catch (e) {
       await textRecognizer.close();
@@ -131,8 +97,7 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
     final XFile? picked = await _picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
 
-    // The picker can stay open for a while — re-check the deadline now,
-    // not just when the button was drawn.
+   
     if (widget.deadline != null && !DateTime.now().isBefore(widget.deadline!)) {
       if (!mounted) return;
       setState(() {
@@ -144,7 +109,7 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
 
     setState(() {
       _isUploading = true;
-      _bannerMessage = null; // clear any previous attempt's banner
+      _bannerMessage = null; 
     });
     final file = File(picked.path);
 
@@ -301,9 +266,7 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
                   )
                 : const Icon(Icons.upload_rounded, color: Colors.white, size: 18),
             label: Text(
-              // Fixed, short label — never interpolates the provider
-              // string, so this can't stretch into a long line regardless
-              // of how that value happens to be stored on an order.
+             
               _isUploading ? "Uploading..." : "Upload Receipt",
               style: const TextStyle(
                 color: Colors.white,

@@ -4,7 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'onboarding/page1.dart';
 import 'onboarding/page3.dart';
-import 'main_navigation.dart'; // Adjust path based on your folder structure
+import 'main_navigation.dart';
 import 'rider/rider_home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -117,13 +117,11 @@ class _SplashScreenState extends State<SplashScreen>
     });
   }
 
-  // --- Auth status check logic ---
   Future<void> _checkUserAuthAndNavigate() async {
     final user = FirebaseAuth.instance.currentUser;
 
     if (user != null) {
       try {
-        // Firestore se user ka status aur role check kar rahe hain
         final userDoc = await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
@@ -131,16 +129,7 @@ class _SplashScreenState extends State<SplashScreen>
 
         if (userDoc.exists) {
           final data = userDoc.data();
-          // The 'role' text field this used to read was removed when
-          // login_screen.dart / signup_screen.dart switched to writing
-          // 'roleId' (an ID like 'R002', looked up against roleMap) as
-          // the source of truth — 'role' is never written anywhere
-          // anymore, so this always read null and fell back to
-          // 'customer'. That's why reopening the app after a rider
-          // login landed on the Customer screen every time, showing the
-          // rider's own name there instead. Same roleId check as
-          // login_screen.dart, with the same legacy 'role' text
-          // fallback for any older accounts that predate roleId.
+          
           final String roleId = (data?['roleId'] ?? '').toString();
           final String legacyRole = (data?['role'] ?? '')
               .toString()
@@ -150,11 +139,7 @@ class _SplashScreenState extends State<SplashScreen>
           if (!mounted) return;
 
           if (isRider) {
-            // This user's own users/{uid} document is a rider profile —
-            // send them to the Rider dashboard, not the customer shell.
-            // (Previously this branch also pushed MainScreen, which is
-            // why reopening the app always landed on the Customer home
-            // screen regardless of which role was last logged in.)
+            // Riders go to their own dashboard
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
@@ -162,7 +147,6 @@ class _SplashScreenState extends State<SplashScreen>
               ),
             );
           } else {
-            // Customer logged in -> Direct Main/Home Screen
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (_) => const MainScreen()),
@@ -175,10 +159,7 @@ class _SplashScreenState extends State<SplashScreen>
       }
     }
 
-    // Agar user logged in nahi hai: pehli baar app kholne wale ko
-    // Page 1 (onboarding intro) se shuru karayein; jinhon ne onboarding
-    // pehle dekh li hai unhe seedha Role Selection screen (OnboardPage3)
-    // par bhejein, jaisa pehle hota tha.
+    
     final prefs = await SharedPreferences.getInstance();
     final seenOnboarding = prefs.getBool('has_seen_onboarding') ?? false;
 

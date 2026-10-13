@@ -19,38 +19,106 @@ class _ForgotPasswordState extends State<ForgotPassword> {
   static const primary = Color(0xFFA70000);
   static const cardColor = Color(0xFFFFFDFA);
 
+  // Same message colors as Login / Sign Up screens
+  static const Color successBorder = Color(0xFF4A7C59);
+  static const Color successBg = Color(0xFFEAF3ED);
+  static const Color successText = Color(0xFF2F5B3E);
+  static const Color errorBorder = Color(0xFFC62828);
+  static const Color errorBg = Color(0xFFFDECEA);
+  static const Color errorText = Color(0xFFB71C1C);
+
+  // Only Gmail addresses are allowed
+  String? _emailError(String? value) {
+    final v = value?.trim().toLowerCase() ?? '';
+    if (v.isEmpty) return 'Please enter your email address';
+
+    final gmailRegex = RegExp(r'^[a-z0-9._%+\-]+@gmail\.com$');
+    if (!gmailRegex.hasMatch(v)) {
+      return 'Only @gmail.com is allowed';
+    }
+    return null;
+  }
+
+  String _resetErrorMessage(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'user-not-found':
+        return "We couldn't find an account with this email. Please check it or sign up.";
+      case 'invalid-email':
+        return 'Please enter a valid email address, like name@example.com.';
+      case 'missing-email':
+        return 'Please enter your email address.';
+      case 'user-disabled':
+        return 'This account has been disabled. Please contact support.';
+      case 'network-request-failed':
+        return 'No internet connection. Please check your network and try again.';
+      case 'too-many-requests':
+        return 'Too many attempts. Please wait a few minutes and try again.';
+      default:
+        return "We couldn't send the reset email. Please try again.";
+    }
+  }
+
   Future<void> _resetPassword() async {
     if (!_formKey.currentState!.validate()) return;
 
     final email = _emailController.text.trim();
-    if (email.isEmpty) {
-      _snack('Please enter your email');
-      return;
-    }
 
     setState(() => _isLoading = true);
 
     try {
       await _auth.sendPasswordResetEmail(email: email);
-      _snack('✅ Password reset email sent to $email');
+      _snack(
+        'Reset link sent to $email. Please check your inbox.',
+        isError: false,
+      );
 
-      // Optional: Navigate back to login screen after short delay
       await Future.delayed(const Duration(seconds: 2));
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (e) {
-      _snack(e.message ?? 'Error sending reset email');
+      _snack(_resetErrorMessage(e));
     } catch (e) {
-      _snack('Something went wrong. Try again.');
+      _snack('Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _snack(String msg) {
+  void _snack(String msg, {bool isError = true}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: primary));
+    final borderColor = isError ? errorBorder : successBorder;
+    final fillColor = isError ? errorBg : successBg;
+    final textColor = isError ? errorText : successText;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        padding: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        duration: const Duration(seconds: 3),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor, width: 1.2),
+          ),
+          child: Text(
+            msg,
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.visible,
+            style: TextStyle(
+              color: textColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -156,12 +224,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                       icon: Icons.email_outlined,
                       keyboardType: TextInputType.emailAddress,
                       validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        } else if (!value.contains('@')) {
-                          return 'Enter a valid email';
-                        }
-                        return null;
+                        return _emailError(value);
                       },
                     ),
                   ),

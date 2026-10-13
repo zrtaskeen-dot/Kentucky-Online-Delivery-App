@@ -31,15 +31,8 @@ class CartScreen extends StatelessWidget {
     return subtotal < _freeDeliveryThreshold ? branchDeliveryCharge : 0;
   }
 
-  Future<void> _updateQuantity(String docId, int currentQty, int change) async {
-    int newQty = currentQty + change;
-    if (newQty <= 0) {
-      await FirebaseFirestore.instance.collection('carts').doc(docId).delete();
-    } else {
-      await FirebaseFirestore.instance.collection('carts').doc(docId).update({
-        'quantity': newQty,
-      });
-    }
+  Future<void> _updateQuantity(CartLine line, int currentQty, int change) async {
+    await CartService.setQuantity(line, currentQty + change);
   }
 
   // Same compact, single-line, colored-card snackbar style used on the
@@ -137,9 +130,8 @@ class CartScreen extends StatelessWidget {
 
           // Sirf active branch ke items. Purane docs jin mein 'branchId' nahi
           // hai wo filter se bahar nahi hote (warna cart se ghaib ho jate).
-          var cartDocs = snapshot.data!.docs.where((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final docBranchId = (data['branchId'] ?? '').toString();
+          var cartDocs = CartService.linesFromDocs(snapshot.data!.docs).where((line) {
+            final docBranchId = (line.data['branchId'] ?? '').toString();
             return docBranchId.isEmpty || docBranchId == activeBranchId;
           }).toList();
 
@@ -155,7 +147,7 @@ class CartScreen extends StatelessWidget {
           List<CartItem> structuredCartItems = [];
 
           for (var doc in cartDocs) {
-            var data = doc.data() as Map<String, dynamic>;
+            var data = doc.data;
             double price = readPriceValue(data['price']);
             int qty = readItemQuantity(data).round();
             calculatedTotalPrice += (price * qty);
@@ -187,8 +179,8 @@ class CartScreen extends StatelessWidget {
                   ),
                   itemCount: cartDocs.length,
                   itemBuilder: (context, index) {
-                    var docId = cartDocs[index].id;
-                    var item = cartDocs[index].data() as Map<String, dynamic>;
+                    final line = cartDocs[index];
+                    var item = line.data;
 
                     bool isSmartCombo = item['isSmartCombo'] ?? false;
                     String itemName = item['name'] ?? 'Item';
@@ -200,7 +192,7 @@ class CartScreen extends StatelessWidget {
 
                     if (isSmartCombo && nestedItems.isNotEmpty) {
                       return _buildComboCard(
-                        docId: docId,
+                        line: line,
                         itemName: itemName,
                         itemPrice: itemPrice,
                         itemQty: itemQty,
@@ -209,7 +201,7 @@ class CartScreen extends StatelessWidget {
                     }
 
                     return _buildRegularItemCard(
-                      docId: docId,
+                      line: line,
                       itemName: itemName,
                       itemPrice: itemPrice,
                       itemQty: itemQty,
@@ -415,7 +407,7 @@ class CartScreen extends StatelessWidget {
   }
 
   Widget _buildRegularItemCard({
-    required String docId,
+    required CartLine line,
     required String itemName,
     required int itemPrice,
     required int itemQty,
@@ -515,12 +507,9 @@ class CartScreen extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildQuantityBox(docId, itemQty),
+                    _buildQuantityBox(line, itemQty),
                     InkWell(
-                      onTap: () => FirebaseFirestore.instance
-                          .collection('carts')
-                          .doc(docId)
-                          .delete(),
+                      onTap: () => CartService.removeLine(line),
                       child: const Text(
                         "REMOVE",
                         style: TextStyle(
@@ -542,7 +531,7 @@ class CartScreen extends StatelessWidget {
   }
 
   Widget _buildComboCard({
-    required String docId,
+    required CartLine line,
     required String itemName,
     required int itemPrice,
     required int itemQty,
@@ -660,12 +649,9 @@ class CartScreen extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildQuantityBox(docId, itemQty),
+                    _buildQuantityBox(line, itemQty),
                     InkWell(
-                      onTap: () => FirebaseFirestore.instance
-                          .collection('carts')
-                          .doc(docId)
-                          .delete(),
+                      onTap: () => CartService.removeLine(line),
                       child: const Text(
                         "REMOVE",
                         style: TextStyle(
@@ -686,10 +672,10 @@ class CartScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildQuantityBox(String docId, int currentQty) {
+  Widget _buildQuantityBox(CartLine line, int currentQty) {
     return Row(
       children: [
-        _qtyButton("-", () => _updateQuantity(docId, currentQty, -1)),
+        _qtyButton("-", () => _updateQuantity(line, currentQty, -1)),
         Container(
           width: 32,
           height: 32,
@@ -708,7 +694,7 @@ class CartScreen extends StatelessWidget {
             ),
           ),
         ),
-        _qtyButton("+", () => _updateQuantity(docId, currentQty, 1)),
+        _qtyButton("+", () => _updateQuantity(line, currentQty, 1)),
       ],
     );
   }

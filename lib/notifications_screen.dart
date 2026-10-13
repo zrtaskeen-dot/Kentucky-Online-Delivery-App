@@ -1,27 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-// ⚠️ Adjust this path to wherever notification_service.dart actually lives
-// in your project (e.g. '../services/notification_service.dart').
 import 'notification_service.dart';
 
 class NotificationScreen extends StatelessWidget {
   const NotificationScreen({super.key});
 
-  static const primaryColor = Color(0xFFA70000); // App's standard maroon theme
+  static const primaryColor = Color(0xFFA70000); 
 
   @override
   Widget build(BuildContext context) {
     final currentUser = FirebaseAuth.instance.currentUser;
 
-    // When this account was created — used to hide broadcast notifications
-    // (new menu items/deals) that went out before this customer even
-    // registered. Their personal, order-specific notifications are never
-    // affected by this, since those can't exist before the account does.
+   
     final accountCreatedAt = currentUser?.metadata.creationTime;
 
     return Scaffold(
-      backgroundColor: Colors.white, // Matches Order Detail/History background
+      backgroundColor: Colors.white, 
       appBar: AppBar(
         title: const Text(
           'Notifications',
@@ -45,9 +40,7 @@ class NotificationScreen extends StatelessWidget {
       body: currentUser == null
           ? const Center(child: Text('Please log in to see notifications.'))
           : StreamBuilder<QuerySnapshot>(
-              // 'ALL' catches store-wide notifications (new menu item/deal)
-              // sent via NotificationService.broadcastToAllCustomers, while
-              // currentUser.uid catches this customer's own order updates.
+             
               stream: FirebaseFirestore.instance
                   .collection('notifications')
                   .where('userId', whereIn: [currentUser.uid, 'ALL'])
@@ -60,10 +53,7 @@ class NotificationScreen extends StatelessWidget {
                   );
                 }
 
-                // Show the real reason instead of silently saying "No
-                // notifications yet!" — a missing composite index (needed
-                // because this query combines whereIn with orderBy) shows
-                // up as an error here, not as an empty list.
+               
                 if (snapshot.hasError) {
                   return Center(
                     child: Padding(
@@ -77,11 +67,7 @@ class NotificationScreen extends StatelessWidget {
                   );
                 }
 
-                // Firestore query already filtered by userId — now we also
-                // drop any doc whose `hiddenFor` array contains this
-                // customer's uid, i.e. notifications they've "deleted"
-                // from their own list (the doc itself is untouched in the
-                // database, and still shows to everyone else it's meant for).
+                
                 final allDocs = snapshot.data?.docs ?? [];
                 final docs = allDocs.where((doc) {
                   final data = doc.data() as Map<String, dynamic>? ?? {};
@@ -90,12 +76,7 @@ class NotificationScreen extends StatelessWidget {
                   );
                   if (hiddenFor.contains(currentUser.uid)) return false;
 
-                  // New users shouldn't see store-wide broadcasts (new
-                  // menu items / deals) that were sent before they even
-                  // created their account — only ones sent from that
-                  // point onward. If we don't know the account creation
-                  // time for some reason, fail open (show it) rather than
-                  // hiding a legitimate notification.
+                  
                   final notifUserId = data['userId'];
                   if (notifUserId == 'ALL' && accountCreatedAt != null) {
                     final ts = data['timestamp'];
@@ -122,7 +103,7 @@ class NotificationScreen extends StatelessWidget {
                   itemCount: docs.length,
                   itemBuilder: (context, index) {
                     final doc = docs[index];
-                    // ✅ FIXED DATA CASTING
+                    
                     final data = doc.data() as Map<String, dynamic>? ?? {};
 
                     final title = data['title'] ?? 'Notification';
@@ -265,17 +246,11 @@ class NotificationScreen extends StatelessWidget {
     );
   }
 
-  // ── DELETE (HIDE-ONLY) HELPERS ──
-  // "Delete" here always means: hide from this customer's own list.
-  // The Firestore document itself is never removed.
+  
 
   static const _cardWhite = Color(0xFFFFFDFA);
 
-  // Pakistani-style date/time: DD/MM/YYYY (day before month, not the
-  // US MM/DD/YYYY order) with a 12-hour clock + AM/PM, e.g.
-  // "15/09/2026, 4:45 PM". Firestore's serverTimestamp() is stored in
-  // UTC internally — .toDate().toLocal() converts it to the device's
-  // local time before formatting.
+  
   String _formatPakistaniTimestamp(dynamic raw) {
     if (raw is! Timestamp) return '';
     final dt = raw.toDate().toLocal();
@@ -292,8 +267,7 @@ class NotificationScreen extends StatelessWidget {
     return '$day/$month/$year, $hour12:$minute $period';
   }
 
-  // Shared app-themed confirmation dialog. Returns true only if the
-  // person tapped the destructive action.
+  
   Future<bool> _showThemedConfirm(
     BuildContext context, {
     required String title,

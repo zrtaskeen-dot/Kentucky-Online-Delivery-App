@@ -1,9 +1,3 @@
-// ── DOMAIN LAYER ─────────────────────────────────────────────
-// Pure business-logic helpers: no Firestore calls, no UI widgets.
-// Only data transformation. Used by both the data layer (repository)
-// and the presentation layer (screens) so price/quantity reading is
-// consistent everywhere.
-
 double readPriceValue(dynamic raw) {
   if (raw == null) return 0;
   if (raw is num) return raw.toDouble();
@@ -28,9 +22,7 @@ double readItemQuantity(Map<String, dynamic> item) {
   return double.tryParse(raw.toString()) ?? 1;
 }
 
-// Order-level total: prefers an explicit total field on the order doc,
-// falls back to summing item price × quantity if none is present or
-// it's 0.
+
 double computeOrderTotal(Map<String, dynamic> orderData, List<Map<String, dynamic>> items) {
   final raw = orderData['totalAmount'] ??
       orderData['total_bill'] ??
@@ -50,8 +42,7 @@ double computeOrderTotal(Map<String, dynamic> orderData, List<Map<String, dynami
   return sum;
 }
 
-// Normalizes the raw `items`/`cartItems` list from a Firestore order doc
-// into a clean List<Map<String, dynamic>>.
+
 List<Map<String, dynamic>> readOrderItems(Map<String, dynamic> orderData) {
   final raw = orderData['items'] ?? orderData['cartItems'] ?? [];
   if (raw is! List) return [];

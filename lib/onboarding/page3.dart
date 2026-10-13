@@ -3,8 +3,6 @@ import '../login_screen.dart';
 
 class OnboardPage3 extends StatelessWidget {
   const OnboardPage3({super.key});
-
-  // Same brand palette as the rest of the onboarding flow.
   static const primary = Color(0xFFA70000);
   static const maroonDark = Color(0xFF6E0000);
   static const ink = Color(0xFF2B1010);
@@ -29,12 +27,13 @@ class OnboardPage3 extends StatelessWidget {
                   height: 80,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: primary.withValues(alpha: 0.4), width: 2),
+                    border: Border.all(
+                      color: primary.withValues(alpha: 0.4),
+                      width: 2,
+                    ),
                   ),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(
-                      22,
-                    ), // border se thoda chhota
+                    borderRadius: BorderRadius.circular(22),
                     child: Image.asset(
                       'assets/kentucky_logo.png',
                       fit: BoxFit.cover,
@@ -66,7 +65,6 @@ class OnboardPage3 extends StatelessWidget {
                 ),
                 const SizedBox(height: 40),
 
-                // --- CUSTOMER — primary action, filled ---
                 SizedBox(
                   width: screenWidth * 0.68,
                   height: 54,
@@ -102,8 +100,6 @@ class OnboardPage3 extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
 
-                // --- RIDER — secondary action, outlined so it doesn't
-                // compete with the primary customer path ---
                 SizedBox(
                   width: screenWidth * 0.68,
                   height: 54,

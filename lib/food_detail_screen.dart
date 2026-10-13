@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'models/food_item.dart';
+import 'cart_provider.dart';
 
 class FoodDetailScreen extends StatefulWidget {
   final FoodItem item;
@@ -148,11 +149,10 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     _fetchToppings();
   }
 
-  // ── Quantity limits ──────────────────────────────────────────────
-  // "+" button yahan tak jata hai. Isse zyada ke liye customer number par
-  // tap karke khud type kar sakta hai (maxLength 5 => 99,999 tak).
-  static const int _stepperMaxQty = 500;
-  static const int _manualMaxQty = 99999;
+  // ── Quantity limit ───────────────────────────────────────────────
+  // Neither the "+" button nor typing can go above this (e.g. typing 600
+  // or 800 snaps back to 500).
+  static const int _maxQty = 500;
 
   final TextEditingController _qtyController = TextEditingController(text: '1');
   final FocusNode _qtyFocus = FocusNode();
@@ -170,10 +170,10 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     if (!_qtyFocus.hasFocus) _commitQtyText();
   }
 
-  // Quantity ko 1.._manualMaxQty mein rakhta hai aur text field ko sync karta hai.
+  // Quantity ko 1.._maxQty (500) mein rakhta hai aur text field ko sync karta hai.
   void _setQuantity(int value) {
     if (!mounted) return;
-    final int q = value.clamp(1, _manualMaxQty).toInt();
+    final int q = value.clamp(1, _maxQty).toInt();
     setState(() => quantity = q);
     final String text = q.toString();
     if (_qtyController.text != text) {
@@ -188,9 +188,12 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   // Khali ya 0 ho to last valid quantity rehti hai (field abhi edit ho raha hai).
   void _onQtyTyped(String raw) {
     final int? parsed = int.tryParse(raw);
-    if (parsed != null && parsed >= 1) {
-      setState(() => quantity = parsed);
+    if (parsed == null || parsed < 1) return;
+    if (parsed > _maxQty) {
+      _setQuantity(_maxQty); // typed 600 / 800 ... -> 500
+      return;
     }
+    setState(() => quantity = parsed);
   }
 
   // Edit khatam: khali/0 ho to last valid quantity wapas, warna "007" -> "7".
@@ -200,7 +203,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   }
 
   void _incrementQty() {
-    if (quantity >= _stepperMaxQty) return; // zyada ke liye number par tap karo
+    if (quantity >= _maxQty) return;
     FocusScope.of(context).unfocus();
     _setQuantity(quantity + 1);
   }
@@ -232,6 +235,51 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     }
   }
 
+  // Menu document ID of this item (so the cart can later look up the live
+  // menu item). Falls back to '' if the FoodItem model has no `id` field.
+  String _menuItemId() {
+    try {
+      return ((widget.item as dynamic).id ?? '').toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  // Error message in the app's maroon theme (floating, rounded, white text).
+  void _showErrorSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(
+                Icons.error_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: themeColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+  }
+
   Future<void> _addToCart() async {
     // Keyboard band karo aur typed quantity final kar do.
     FocusScope.of(context).unfocus();
@@ -245,27 +293,24 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
           .where((n) => n.isNotEmpty)
           .toList();
 
-      await FirebaseFirestore.instance
-          .collection('carts')
-          .add({
-            'userId': userId,
-            'branchId': widget.selectedBranchId,
-            'name': hasSizes && selectedSize.isNotEmpty
-                ? '${widget.item.name} (${_formatSizeLabel(selectedSize)})'
-                : widget.item.name,
-            'price': price,
-            'quantity': quantity,
-            'imageUrl': widget.item.imageUrl,
-            'category': widget.item.category,
-            'selectedSize': hasSizes ? selectedSize : 'regular',
-            'toppings': toppingNames,
-            'isSmartCombo': false,
-            'addedAt': FieldValue.serverTimestamp(),
-          })
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw TimeoutException('Add to cart timed out'),
-          );
+      // All items of this customer go into ONE cart document (carts/{userId}).
+      await CartService.addItem(userId, {
+        'menuItemId': _menuItemId(),
+        'branchId': widget.selectedBranchId,
+        'name': hasSizes && selectedSize.isNotEmpty
+            ? '${widget.item.name} (${_formatSizeLabel(selectedSize)})'
+            : widget.item.name,
+        'price': price,
+        'quantity': quantity,
+        'imageUrl': widget.item.imageUrl,
+        'category': widget.item.category,
+        'selectedSize': hasSizes ? selectedSize : 'regular',
+        'toppings': toppingNames,
+        'isSmartCombo': false,
+      }).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('Add to cart timed out'),
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -287,27 +332,22 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
         Navigator.pop(context);
       }
     } on TimeoutException catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please check your internet connection and try again.',
-            ),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showErrorSnack('Please check your internet connection and try again.');
+    } on FirebaseException catch (e) {
+      debugPrint('Add to cart failed: ${e.code} ${e.message}');
+      final bool offline =
+          e.code == 'unavailable' ||
+          e.code == 'network-request-failed' ||
+          e.code == 'deadline-exceeded';
+      _showErrorSnack(
+        offline
+            ? 'Please check your internet connection and try again.'
+            : 'Could not add to cart. Please try again.',
+      );
     } catch (e, stack) {
-      debugPrint('❌ Add to cart failed: $e');
+      debugPrint('Add to cart failed: $e');
       debugPrint('$stack');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Something went wrong: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showErrorSnack('Could not add to cart. Please try again.');
     } finally {
       if (mounted) setState(() => isAddingToCart = false);
     }
@@ -386,7 +426,9 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
 
                         if (widget.item.description.isNotEmpty)
                           _infoCard(
-                            title: isComboOrDeal ? 'Description' : 'Ingredients',
+                            title: isComboOrDeal
+                                ? 'Description'
+                                : 'Ingredients',
                             child: Text(
                               widget.item.description,
                               style: TextStyle(
@@ -699,7 +741,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   }
 
   Widget _buildQuantityRectBox() {
-    final bool atStepperMax = quantity >= _stepperMaxQty;
+    final bool atStepperMax = quantity >= _maxQty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -723,7 +765,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
                 textAlign: TextAlign.center,
-                maxLength: 5,
+                maxLength: 3,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 cursorColor: themeColor,
                 onTap: () => _qtyController.selection = TextSelection(
@@ -752,7 +794,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
         const SizedBox(height: 8),
         Text(
           atStepperMax
-              ? 'Maximum $_stepperMaxQty Items Quantity.'
+              ? 'Maximum $_maxQty Items Quantity.'
               : 'Tap the number to type a custom quantity.',
           style: TextStyle(
             fontSize: 11.5,

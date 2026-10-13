@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'models/food_item.dart';
+import 'cart_provider.dart';
 
 class PizzaDetailScreen extends StatefulWidget {
   final FoodItem item;
@@ -20,9 +21,8 @@ class PizzaDetailScreen extends StatefulWidget {
 }
 
 class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
-  // App Theme Colors (matches the rest of the app's maroon brand palette)
-  static const Color themeColor = Color(0xFFA70000); // Main Maroon Accent
-  static const Color bgColor = Colors.white; // Matches cardColor/bottom bar
+  static const Color themeColor = Color(0xFFA70000);
+  static const Color bgColor = Colors.white;
   static const Color lightMaroon = Color(0x33A70000);
   static const Color cardColor = Color(0xFFFFFDFA);
 
@@ -107,11 +107,9 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     _fetchToppings();
   }
 
-  // ── Quantity limits ──────────────────────────────────────────────
-  // "+" button yahan tak jata hai. Isse zyada ke liye customer number par
-  // tap karke khud type kar sakta hai (maxLength 5 => 99,999 tak).
-  static const int _stepperMaxQty = 500;
-  static const int _manualMaxQty = 99999;
+  //  Quantity limit
+
+  static const int _maxQty = 500;
 
   final TextEditingController _qtyController = TextEditingController(text: '1');
   final FocusNode _qtyFocus = FocusNode();
@@ -125,14 +123,12 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   }
 
   void _onQtyFocusChange() {
-    // Field se bahar jate hi typed value ko theek (normalize) kar do.
     if (!_qtyFocus.hasFocus) _commitQtyText();
   }
 
-  // Quantity ko 1.._manualMaxQty mein rakhta hai aur text field ko sync karta hai.
   void _setQuantity(int value) {
     if (!mounted) return;
-    final int q = value.clamp(1, _manualMaxQty).toInt();
+    final int q = value.clamp(1, _maxQty).toInt();
     setState(() => quantity = q);
     final String text = q.toString();
     if (_qtyController.text != text) {
@@ -143,23 +139,23 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     }
   }
 
-  // Typing ke dauran: valid number ho to total foran update hota hai.
-  // Khali ya 0 ho to last valid quantity rehti hai (field abhi edit ho raha hai).
   void _onQtyTyped(String raw) {
     final int? parsed = int.tryParse(raw);
-    if (parsed != null && parsed >= 1) {
-      setState(() => quantity = parsed);
+    if (parsed == null || parsed < 1) return;
+    if (parsed > _maxQty) {
+      _setQuantity(_maxQty);
+      return;
     }
+    setState(() => quantity = parsed);
   }
 
-  // Edit khatam: khali/0 ho to last valid quantity wapas, warna "007" -> "7".
   void _commitQtyText() {
     final int? parsed = int.tryParse(_qtyController.text);
     _setQuantity((parsed == null || parsed < 1) ? quantity : parsed);
   }
 
   void _incrementQty() {
-    if (quantity >= _stepperMaxQty) return; // zyada ke liye number par tap karo
+    if (quantity >= _maxQty) return;
     FocusScope.of(context).unfocus();
     _setQuantity(quantity + 1);
   }
@@ -172,10 +168,6 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
 
   Future<void> _fetchToppings() async {
     try {
-      // NOTE: assumes topping documents carry a `branchId` field, the
-      // same way cart entries do (see 'branchId': widget.selectedBranchId
-      // below) — adjust the field name here if your toppings collection
-      // uses a different one.
       final snap = await FirebaseFirestore.instance
           .collection('toppings')
           .where('category', isEqualTo: widget.item.category)
@@ -192,8 +184,49 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
     }
   }
 
+  String _menuItemId() {
+    try {
+      return ((widget.item as dynamic).id ?? '').toString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  void _showErrorSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(
+                Icons.error_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: themeColor,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+      );
+  }
+
   Future<void> _addToCart() async {
-    // Keyboard band karo aur typed quantity final kar do.
     FocusScope.of(context).unfocus();
     _commitQtyText();
     setState(() => isAddingToCart = true);
@@ -205,25 +238,21 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
           .where((n) => n.isNotEmpty)
           .toList();
 
-      await FirebaseFirestore.instance
-          .collection('carts')
-          .add({
-            'userId': userId,
-            'branchId': widget.selectedBranchId,
-            'name': '${widget.item.name} ($selectedSize)',
-            'price': price,
-            'quantity': quantity,
-            'imageUrl': widget.item.imageUrl,
-            'category': widget.item.category,
-            'selectedSize': selectedSize,
-            'toppings': toppingNames,
-            'isSmartCombo': false,
-            'addedAt': FieldValue.serverTimestamp(),
-          })
-          .timeout(
-            const Duration(seconds: 10),
-            onTimeout: () => throw TimeoutException('Add to cart timed out'),
-          );
+      await CartService.addItem(userId, {
+        'menuItemId': _menuItemId(),
+        'branchId': widget.selectedBranchId,
+        'name': '${widget.item.name} ($selectedSize)',
+        'price': price,
+        'quantity': quantity,
+        'imageUrl': widget.item.imageUrl,
+        'category': widget.item.category,
+        'selectedSize': selectedSize,
+        'toppings': toppingNames,
+        'isSmartCombo': false,
+      }).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('Add to cart timed out'),
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -239,28 +268,22 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         Navigator.pop(context);
       }
     } on TimeoutException catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Please check your internet connection and try again.',
-            ),
-            backgroundColor: themeColor,
-          ),
-        );
-      }
+      _showErrorSnack('Please check your internet connection and try again.');
+    } on FirebaseException catch (e) {
+      debugPrint('Add to cart failed: ${e.code} ${e.message}');
+      final bool offline =
+          e.code == 'unavailable' ||
+          e.code == 'network-request-failed' ||
+          e.code == 'deadline-exceeded';
+      _showErrorSnack(
+        offline
+            ? 'Please check your internet connection and try again.'
+            : 'Could not add to cart. Please try again.',
+      );
     } catch (e, stack) {
-      debugPrint('Add to cart FAILED: $e');
+      debugPrint('Add to cart failed: $e');
       debugPrint('$stack');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Something went wrong: $e'),
-            backgroundColor: themeColor,
-          ),
-        );
-      }
+      _showErrorSnack('Could not add to cart. Please try again.');
     } finally {
       if (mounted) setState(() => isAddingToCart = false);
     }
@@ -364,30 +387,46 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                                           child: ClipOval(
                                             child:
                                                 widget.item.imageUrl.isNotEmpty
-                                                ? Image.network(
-                                                    widget.item.imageUrl,
-                                                    width: circleSize,
-                                                    height: circleSize,
-                                                    fit: BoxFit.cover,
-                                                    errorBuilder:
-                                                        (_, __, ___) => Icon(
-                                                          Icons
-                                                              .local_pizza_rounded,
-                                                          size:
-                                                              circleSize * 0.52,
-                                                          color: isSelected
-                                                              ? themeColor
-                                                              : Colors
-                                                                    .grey
-                                                                    .shade400,
-                                                        ),
+                                                ? Opacity(
+                                                    opacity: isSelected
+                                                        ? 1.0
+                                                        : 0.6,
+                                                    child: Image.network(
+                                                      widget.item.imageUrl,
+                                                      width: circleSize,
+                                                      height: circleSize,
+                                                      fit: BoxFit.cover,
+                                                      errorBuilder:
+                                                          (
+                                                            _,
+                                                            __,
+                                                            ___,
+                                                          ) => Center(
+                                                            child: Icon(
+                                                              Icons
+                                                                  .local_pizza_rounded,
+                                                              size:
+                                                                  circleSize *
+                                                                  0.52,
+                                                              color: isSelected
+                                                                  ? themeColor
+                                                                  : Colors
+                                                                        .grey
+                                                                        .shade400,
+                                                            ),
+                                                          ),
+                                                    ),
                                                   )
-                                                : Icon(
-                                                    Icons.local_pizza_rounded,
-                                                    size: circleSize * 0.52,
-                                                    color: isSelected
-                                                        ? themeColor
-                                                        : Colors.grey.shade400,
+                                                : Center(
+                                                    child: Icon(
+                                                      Icons.local_pizza_rounded,
+                                                      size: circleSize * 0.52,
+                                                      color: isSelected
+                                                          ? themeColor
+                                                          : Colors
+                                                                .grey
+                                                                .shade400,
+                                                    ),
                                                   ),
                                           ),
                                         ),
@@ -716,7 +755,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
   }
 
   Widget _buildQuantityRectBox() {
-    final bool atStepperMax = quantity >= _stepperMaxQty;
+    final bool atStepperMax = quantity >= _maxQty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -733,14 +772,14 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
                   horizontal: BorderSide(color: Colors.grey.shade300),
                 ),
               ),
-              // Tap karke seedha type kar sakte hain.
+
               child: TextField(
                 controller: _qtyController,
                 focusNode: _qtyFocus,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
                 textAlign: TextAlign.center,
-                maxLength: 5,
+                maxLength: 3,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 cursorColor: themeColor,
                 onTap: () => _qtyController.selection = TextSelection(
@@ -769,7 +808,7 @@ class _PizzaDetailScreenState extends State<PizzaDetailScreen> {
         const SizedBox(height: 8),
         Text(
           atStepperMax
-              ? 'Maximum $_stepperMaxQty with + . Tap the number to type a larger quantity.'
+              ? 'Maximum $_maxQty Items Quantity.'
               : 'Tap the number to type a custom quantity.',
           style: TextStyle(
             fontSize: 11.5,

@@ -43,7 +43,7 @@ class FirestoreService {
       // where paymentReminderSent is explicitly false, so this flag has to
       // be written here at order creation.
       final bool isScheduledOnline =
-          deliveryTime != 'As soon as possible' &&
+          deliveryTime != 'Standard Delivery' &&
           paymentMethod != 'Cash On Delivery';
 
       // 👈 CHANGED: ab har field camelCase (no underscores) hai, taake

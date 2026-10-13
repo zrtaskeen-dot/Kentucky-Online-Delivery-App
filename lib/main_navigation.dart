@@ -354,21 +354,21 @@ class _MainScreenState extends State<MainScreen> {
               unselectedFontSize: 0,
 
               items: [
-                // 1. HOME
+                // Home
                 BottomNavigationBarItem(
                   icon: unselectedIcon(Icons.home),
                   activeIcon: selectedIcon(Icons.home),
                   label: 'Home',
                 ),
 
-                // 2. MY ORDERS
+                // My orders
                 BottomNavigationBarItem(
                   icon: unselectedIcon(Icons.shopping_bag),
                   activeIcon: selectedIcon(Icons.shopping_bag),
                   label: 'My Orders',
                 ),
 
-                // 3. NOTIFICATIONS
+                // Notifications
                 BottomNavigationBarItem(
                   icon: _notificationIconWithBadge(
                     selected: false,
@@ -383,17 +383,17 @@ class _MainScreenState extends State<MainScreen> {
                   label: 'Alerts',
                 ),
 
-                // 4. PROFILE
+                //  Profile
                 BottomNavigationBarItem(
                   icon: unselectedIcon(Icons.person),
                   activeIcon: selectedIcon(Icons.person),
                   label: 'Profile',
                 ),
               ],
-            ), // closes BottomNavigationBar(
-          ), // closes SizedBox(
-        ), // closes SafeArea(
-      ), // closes Container(
-    ); // closes Scaffold( + ends return statement
+            ), 
+          ), 
+        ), 
+      ), 
+    ); 
   }
 }

@@ -8,17 +8,6 @@ import '../notification_service.dart';
 import 'rider_profile.dart';
 import 'rider_order_track.dart';
 
-// Orders in this app get their status written under two different field
-// names depending on which code path touched them — 'orderStatus'
-// (camelCase, set at checkout as e.g. 'pending') and 'order_status'
-// (snake_case, set by whatever assigns the order to a rider). A single
-// document can end up with BOTH fields present but holding DIFFERENT
-// values (e.g. orderStatus: 'pending', order_status: 'Assigned') — in
-// that case `data['orderStatus'] ?? data['order_status']` silently picks
-// the stale 'pending' value, because `??` only falls through on null,
-// not on "present but wrong". This resolves the real status by trusting
-// whichever field is NOT still sitting at that just-created 'pending'
-// default.
 String resolveOrderStatus(Map data) {
   final camel = (data['orderStatus'] ?? '').toString();
   final snake = (data['order_status'] ?? '').toString();
@@ -35,7 +24,6 @@ class RiderHomeScreen extends StatefulWidget {
   State<RiderHomeScreen> createState() => _RiderHomeScreenState();
 }
 
-// A single delivered order shown in the earnings list.
 class _EarningEntry {
   final String name;
   final bool isOnline;
@@ -53,38 +41,22 @@ class _EarningEntry {
 class _RiderHomeScreenState extends State<RiderHomeScreen>
     with WidgetsBindingObserver {
   int _currentIndex = 0;
-  // 👈 Matches main_navigation.dart's exact brand palette (maroon
-  // gradient + orange + cream), so the rider app's bottom nav looks
-  // like the customer app's instead of the old floating white pill.
-  static const primary = Color(0xFFA70000); // Maroon
-  static const primaryDark = Color(0xFF7A0000); // Gradient's darker end
-  static const accentOrange = Color(0xFFFF8A00); // Selected icon circle
-  static const _pendingRed = Color(0xFFD32F2F); // status buttons before tap
-  static const cream = Color(0xFFFFFDF2); // Unselected icon + badge border
-  static const bgColor = Colors.white; // (same as Home)
 
-  // Earnings filter — a custom date range only. Null start/end means no
-  // filter is applied (all delivered orders are counted).
+  static const primary = Color(0xFFA70000);
+  static const primaryDark = Color(0xFF7A0000);
+  static const accentOrange = Color(0xFFFF8A00);
+  static const _pendingRed = Color(0xFFD32F2F);
+  static const cream = Color(0xFFFFFDF2);
+  static const bgColor = Colors.white;
+
   DateTime? _customStart;
   DateTime? _customEnd;
 
-  // One controller instance kept alive for the whole screen lifetime so
-  // lifecycle callbacks (initState/dispose/didChangeAppLifecycleState) can
-  // flip availability without needing the widget tree / BuildContext.
   late final RiderController _riderController = RiderController();
-
-  // Heartbeat: while the app is in the foreground we stamp `lastSeen`
-  // every 1s. If the app is killed / offline the stamps simply stop,
-  // and the manager treats the rider as offline once lastSeen is stale
-  // (RiderController.isRiderOnline) — this works even when the
-  // "isAvailable: false" write on close never manages to go out.
   Timer? _heartbeatTimer;
   static const Duration _heartbeatEvery = Duration(seconds: 1);
 
-  // Watches this rider's "On the Way" orders and keeps live GPS tracking in
-  // sync with them: every On the Way order gets the rider's live location
-  // (even several at once), and tracking resumes by itself if the app was
-  // closed and reopened while orders were still On the Way.
+  // Updates live GPS location for all On the Way orders
   StreamSubscription<QuerySnapshot>? _onTheWaySub;
 
   void _watchOnTheWayOrders() {
@@ -94,9 +66,8 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         .where('orderStatus', isEqualTo: 'On the Way')
         .snapshots()
         .listen(
-          (snap) => _riderController.syncOnTheWayOrders(
-            snap.docs.map((d) => d.id),
-          ),
+          (snap) =>
+              _riderController.syncOnTheWayOrders(snap.docs.map((d) => d.id)),
           onError: (e) => debugPrint('On the Way watcher error: $e'),
         );
   }
@@ -120,21 +91,16 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     super.initState();
     NotificationService().saveRiderTokenToDatabase(widget.riderId);
     WidgetsBinding.instance.addObserver(this);
-    // App just opened in foreground -> rider is available automatically.
     _goOnline();
     _watchOnTheWayOrders();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // No manual toggle anymore — availability follows the app's own state.
     if (state == AppLifecycleState.resumed) {
-      // Back in foreground -> available again, heartbeat restarts.
       _goOnline();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
-      // Backgrounded or closed -> heartbeat stops and rider is marked
-      // unavailable (best-effort; the stale lastSeen is the safety net).
       _goOffline();
     }
   }
@@ -142,16 +108,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    // Best-effort: also mark unavailable if this screen is torn down
-    // directly (e.g. logout) without an app-lifecycle event firing.
     _goOffline();
     _onTheWaySub?.cancel();
     _riderController.stopLiveLocationTracking();
     super.dispose();
   }
 
-  // Selected icon design — orange circle with a soft glow, white icon on
-  // top, matching main_navigation.dart exactly.
   Widget selectedIcon(IconData icon) {
     return Container(
       width: 44,
@@ -172,26 +134,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     );
   }
 
-  // Normal icon design — soft cream so it stays readable on the maroon bar.
   Widget unselectedIcon(IconData icon) {
     return Icon(icon, color: cream.withValues(alpha: 0.75), size: 22);
   }
 
-  // Same as _buildNavItem, but for the Orders tab specifically: overlays
-  // a small orange count badge showing how many newly-assigned orders are
-  // waiting on this rider (status == 'Assigned', not yet accepted). The
-  // badge hides itself while the rider is already on the Orders tab —
-  // opening that tab is what counts as "having seen" the new orders —
-  // and reappears if a fresh one comes in while they're elsewhere in
-  // the app.
-  //
-  // Checks BOTH 'orderStatus' and 'order_status' — until whatever
-  // assigns orders to riders (outside this file) is confirmed to only
-  // write 'orderStatus', a newly-assigned order could still land with
-  // order_status: 'Assigned' / orderStatus: 'pending', which a
-  // single-field query would silently miss. Once that's fixed and the
-  // one-time migration has run, this second query will simply always
-  // return empty — safe to simplify back to one query at that point.
+  // Shows new assigned orders on the Orders tab
   Widget _buildOrdersNavIcon({required bool selected}) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -212,8 +159,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
               ...?snakeSnapshot.data?.docs.map((d) => d.id),
             };
             final int newOrdersCount = newOrderIds.length;
-            // Badge hides itself while already on the Orders tab —
-            // opening that tab counts as "having seen" the new orders.
             final bool showBadge = newOrdersCount > 0 && !selected;
 
             return Stack(
@@ -332,7 +277,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     );
   }
 
-  // ── Earnings date filter helpers (custom range only) ──────────────
+  // Earnings date filter
 
   String _formatDateShort(DateTime d) {
     const months = [
@@ -378,12 +323,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     return !dt.isBefore(startOfDay) && !dt.isAfter(endOfDay);
   }
 
-  // Orders may record the delivery/creation time under different field
-  // names — prefer the moment the order was actually delivered
-  // (statusUpdatedAt) since that's when the earning was made, and fall
-  // back to other common date fields if it isn't present. The result is
-  // always converted to Pakistan Standard Time (UTC+5) so times shown on
-  // screen are consistent no matter what timezone the phone is set to.
   DateTime? _extractOrderDate(Map<String, dynamic> d) {
     final raw =
         d['statusUpdatedAt'] ??
@@ -398,9 +337,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     if (raw is Timestamp) dt = raw.toDate();
     if (raw is DateTime) dt = raw;
     if (dt == null) return null;
-
-    // Normalize to Pakistan Standard Time (UTC+5), regardless of the
-    // device's own timezone setting.
     return dt.toUtc().add(const Duration(hours: 5));
   }
 
@@ -411,8 +347,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     });
   }
 
-  // A single, themed date picker restricted so no future date (tomorrow
-  // onward) can ever be picked.
   Future<DateTime?> _showThemedDatePicker(DateTime initial) {
     final today = DateTime.now();
     final safeInitial = initial.isAfter(today) ? today : initial;
@@ -487,8 +421,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     );
   }
 
-  // Compact, app-themed bottom sheet with two simple date fields — no
-  // giant calendar and no connecting bar between the start/end dates.
   void _openCustomRangeSheet() {
     DateTime? tempStart = _customStart;
     DateTime? tempEnd = _customEnd;
@@ -705,8 +637,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     );
   }
 
-  // dt is already normalized to Pakistan Standard Time by
-  // _extractOrderDate, so this just formats it as 12-hour with AM/PM.
   String _formatOrderTime(DateTime? dt) {
     if (dt == null) return '--:--';
     int hour12 = dt.hour % 12;
@@ -790,24 +720,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         ],
       ),
     );
-  }
-
-  // ── TEMPORARY: runs the one-time order_status field cleanup and
-  // shows how many orders were fixed. Remove this + the button above
-  // once you've confirmed it worked.
-  Future<void> _runOrderStatusMigration(RiderController rc) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) =>
-          const Center(child: CircularProgressIndicator(color: primary)),
-    );
-    final count = await rc.migrateOrderStatusField();
-    if (!mounted) return;
-    Navigator.pop(context); // close the loading dialog
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Cleaned up $count order(s).')));
   }
 
   Widget _buildDashboardTab(RiderController rc) {
@@ -897,9 +809,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                       ),
                     ],
                   ),
-                  // Read-only status — no toggle. This updates itself when
-                  // the app opens (available) or is backgrounded/closed
-                  // (unavailable), via didChangeAppLifecycleState above.
+
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -924,27 +834,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                 ),
               ),
               const SizedBox(height: 40),
-
-              // ── TEMPORARY: one-time cleanup button ──────────────────
-              // Removes the old 'order_status' (snake_case) field from
-              // every existing order in the database, leaving only
-              // 'orderStatus'. Tap this once, confirm in Firestore
-              // Console that the field is gone from your orders, then
-              // delete this button + _runOrderStatusMigration below.
-              // Padding(
-              //   padding: const EdgeInsets.symmetric(horizontal: 16),
-              //   child: OutlinedButton.icon(
-              //     onPressed: () => _runOrderStatusMigration(rc),
-              //     icon: const Icon(Icons.cleaning_services_outlined, size: 18),
-              //     label: const Text(
-              //       "One-time: clean up order_status field",
-              //     ),
-              //     style: OutlinedButton.styleFrom(
-              //       foregroundColor: Colors.black54,
-              //       side: const BorderSide(color: Colors.black26),
-              //     ),
-              //   ),
-              // ),
               const SizedBox(height: 40),
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
@@ -968,13 +857,9 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                       final status = resolveOrderStatus(orderData);
                       if (status == 'Delivered') {
                         delivered++;
-                        // Rider's earning for a delivered order = its bill.
+
                         final bill = orderData['totalAmount'];
                         final billAmt = (bill is num) ? bill.toDouble() : 0.0;
-
-                        // Only count this order's earning toward the total
-                        // if it falls inside the currently selected date
-                        // filter (Today / This Week / All Time / Custom).
                         final orderDate = _extractOrderDate(orderData);
                         final inSelectedPeriod =
                             orderDate == null ||
@@ -1157,8 +1042,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
             onPressed: () => setState(() => _currentIndex = 0),
           ),
           actions: [
-            // Opens the rider's map with every "On the Way" customer pinned
-            // (with their name) and the rider's live location.
             IconButton(
               tooltip: 'Delivery map',
               icon: const Icon(Icons.map_rounded, color: primary),
@@ -1196,7 +1079,6 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
               final s = resolveOrderStatus(data);
               return s == 'Accepted' ||
                   s == 'Delivery Started' ||
-                  s == 'Picked Up' ||
                   s == 'On the Way';
             }).toList();
 
@@ -1390,14 +1272,12 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
 
   Color _statusColor(String status) {
     switch (status) {
-      case 'Delivery Started':
-        return Colors.deepPurple.shade400;
-      case 'Picked Up':
-        return Colors.blue.shade700;
       case 'On the Way':
         return Colors.orange.shade700;
       case 'Delivered':
         return Colors.green.shade700;
+      case 'Undelivered':
+        return Colors.red.shade700;
       default:
         return Colors.orange.shade700;
     }
@@ -1420,186 +1300,257 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         data['phone'] ?? data['phoneNumber'] ?? data['phone_number'] ?? '';
     final lat = data['latitude'];
     final lng = data['longitude'];
-    final currentStatus = resolveOrderStatus(data);
-    final customerId =
-        data['customerId'] ?? data['userId'] ?? ''; // 👈 Extracted customerId
+    final customerId = data['customerId'] ?? data['userId'] ?? '';
+
+    // "An update is running" for THIS sheet. It lives outside the builder, so
+    // rebuilds (or dragging the sheet down and up) never reset it.
+    final ValueNotifier<bool> busy = ValueNotifier<bool>(false);
+
+    String failureText() =>
+        rc.error.startsWith('Order') ? rc.error : 'Failed to update status';
+
+    Future<void> runStatusUpdate(
+      BuildContext sheetContext,
+      String target,
+      String label,
+    ) async {
+      if (busy.value) return;
+      busy.value = true;
+      try {
+        final ok = await rc.updateOrderStatus(orderId, target);
+        if (ok) {
+          if (target == 'Delivered') {
+            // Delivered: close the sheet right away.
+            if (sheetContext.mounted) Navigator.pop(sheetContext);
+            if (mounted) _showTopBanner(this.context, 'Order marked as $label');
+          } else if (sheetContext.mounted) {
+            _showTopBanner(sheetContext, 'Order marked as $label');
+          }
+        } else if (sheetContext.mounted) {
+          _showTopBanner(sheetContext, failureText());
+        }
+      } finally {
+        busy.value = false;
+      }
+    }
+
+    Future<void> runUndelivered(BuildContext sheetContext) async {
+      if (busy.value) return;
+      busy.value = true;
+      try {
+        final result = await showUndeliveredFlow(
+          sheetContext,
+          rc: rc,
+          orderId: orderId,
+        );
+        if (result == null) return; // reasons sheet closed
+        if (result) {
+          if (sheetContext.mounted) Navigator.pop(sheetContext);
+          if (mounted) {
+            _showTopBanner(this.context, 'Order marked as Undelivered');
+          }
+        } else if (sheetContext.mounted) {
+          _showTopBanner(sheetContext, failureText());
+        }
+      } finally {
+        busy.value = false;
+      }
+    }
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setSheetState) {
-          // Local session state for this sheet:
-          // - localStatus: tracks progress through the sequence within
-          //   this sheet so buttons update immediately after each tap
-          //   without waiting for a Firestore stream refresh.
-          // 👈 FIX: removed the `started` flag entirely. There is no
-          // "Start Delivery" step any more, so the address and the
-          // ON THE WAY button are both usable as soon as the sheet opens
-          // (gated only by having coordinates for the address, and by
-          // the normal sequence logic for the buttons) instead of
-          // waiting for a tap that no longer exists.
-          String localStatus = currentStatus;
+      builder: (_) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        // Always the latest order from Firestore, never a copy from the list.
+        stream: FirebaseFirestore.instance
+            .collection('orders')
+            .doc(orderId)
+            .snapshots(),
+        builder: (context, snap) {
+          final live = snap.data?.data();
+          // '' until the first snapshot arrives: every button stays disabled.
+          final String status = live != null ? resolveOrderStatus(live) : '';
 
-          return StatefulBuilder(
-            builder: (context, setLocalState) {
-              return Container(
-                padding: const EdgeInsets.all(24),
-                decoration: const BoxDecoration(
-                  color: bgColor,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300],
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
+          return Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey[300],
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Order Details',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      _detailRow(
-                        Icons.person_rounded,
-                        'Customer',
-                        customerName,
-                      ),
-                      const SizedBox(height: 14),
-                      _detailRow(
-                        Icons.phone_rounded,
-                        'Phone',
-                        phone,
-                        onTap: () => _callPhone(phone),
-                      ),
-                      const SizedBox(height: 14),
-                      _detailRow(
-                        Icons.payment_rounded,
-                        'Payment',
-                        paymentMethod,
-                      ),
-                      const SizedBox(height: 14),
-                      _detailRow(
-                        Icons.receipt_long_rounded,
-                        'Total Bill',
-                        'Rs. $totalBill',
-                      ),
-                      const SizedBox(height: 14),
-                      // 👈 FIX: tapping the address opens navigation
-                      // immediately — only gated on actually having
-                      // coordinates, not on any "started" flag.
-                      _detailRow(
-                        Icons.location_on_rounded,
-                        'Address',
-                        address,
-                        onTap: (lat != null && lng != null)
-                            ? () => _openMap(lat.toDouble(), lng.toDouble())
-                            : null,
-                        isLink: true,
-                      ),
-                      const SizedBox(height: 24),
-
-                      if (isAccepted) ...[
-                        const Text(
-                          'Update Status',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        // const SizedBox(height: 6),
-                        // const Text(
-                        //   'Customer aur admin ko delivery ka pata chalay.',
-                        //   style: TextStyle(fontSize: 13, color: Colors.grey),
-                        // ),
-                        const SizedBox(height: 16),
-
-                        _statusButton(
-                          label: 'ON THE WAY',
-                          color: Colors.orange.shade700,
-                          orderId: orderId,
-                          targetStatus: 'On the Way',
-                          localStatus: localStatus,
-                          rc: rc,
-                          onSuccess: (s) =>
-                              setLocalState(() => localStatus = s),
-                        ),
-                        const SizedBox(height: 10),
-                        _statusButton(
-                          label: 'DELIVERED',
-                          color: const Color(0xFF6B2000),
-                          orderId: orderId,
-                          targetStatus: 'Delivered',
-                          localStatus: localStatus,
-                          rc: rc,
-                          onSuccess: (s) =>
-                              setLocalState(() => localStatus = s),
-                        ),
-                      ],
-
-                      const SizedBox(height: 20),
-                    ],
+                    ),
                   ),
-                ),
-              );
-            },
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Order Details',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  _detailRow(Icons.person_rounded, 'Customer', customerName),
+                  const SizedBox(height: 14),
+                  _detailRow(
+                    Icons.phone_rounded,
+                    'Phone',
+                    phone,
+                    onTap: () => _callPhone(phone),
+                  ),
+                  const SizedBox(height: 14),
+                  _detailRow(Icons.payment_rounded, 'Payment', paymentMethod),
+                  const SizedBox(height: 14),
+                  _detailRow(
+                    Icons.receipt_long_rounded,
+                    'Total Bill',
+                    'Rs. $totalBill',
+                  ),
+                  const SizedBox(height: 14),
+
+                  _detailRow(
+                    Icons.location_on_rounded,
+                    'Address',
+                    address,
+                    onTap: (lat != null && lng != null)
+                        ? () => _openMap(lat.toDouble(), lng.toDouble())
+                        : null,
+                    isLink: true,
+                  ),
+                  const SizedBox(height: 24),
+
+                  if (isAccepted) ...[
+                    const Text(
+                      'Update Status',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ValueListenableBuilder<bool>(
+                      valueListenable: busy,
+                      builder: (context, isBusy, _) {
+                        return Column(
+                          children: [
+                            _statusButton(
+                              label: 'ON THE WAY',
+                              targetStatus: 'On the Way',
+                              liveStatus: status,
+                              busy: isBusy,
+                              onPressed: () => runStatusUpdate(
+                                context,
+                                'On the Way',
+                                'ON THE WAY',
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            _statusButton(
+                              label: 'DELIVERED',
+                              targetStatus: 'Delivered',
+                              liveStatus: status,
+                              busy: isBusy,
+                              onPressed: () => runStatusUpdate(
+                                context,
+                                'Delivered',
+                                'DELIVERED',
+                              ),
+                            ),
+
+                            // Only while the order is On the Way, i.e.
+                            // exactly when DELIVERED is active.
+                            if (status == 'On the Way') ...[
+                              const SizedBox(height: 10),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: isBusy
+                                      ? null
+                                      : () => runUndelivered(context),
+                                  icon: const Icon(
+                                    Icons.report_gmailerrorred_rounded,
+                                    size: 18,
+                                  ),
+                                  label: const Text(
+                                    'UNDELIVERED',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15,
+                                      letterSpacing: 1,
+                                    ),
+                                  ),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: primary,
+                                    disabledForegroundColor: primary.withValues(
+                                      alpha: 0.35,
+                                    ),
+                                    side: BorderSide(
+                                      color: isBusy
+                                          ? primary.withValues(alpha: 0.3)
+                                          : primary,
+                                      width: 1.4,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+
+                  const SizedBox(height: 20),
+                ],
+              ),
+            ),
           );
         },
       ),
     );
   }
 
-  // Sequence used to decide each status button's state: locked (can't
-  // tap yet), active (tappable — it's the next step), or done (already
-  // completed, can't be re-selected).
   static const List<String> _statusSequence = [
     'Accepted',
     'On the Way',
     'Delivered',
   ];
 
-  int _statusStepIndex(String status) {
-    final i = _statusSequence.indexOf(status);
-    return i == -1 ? 0 : i;
-  }
-
   Widget _statusButton({
     required String label,
-    required Color color,
-    required String orderId,
     required String targetStatus,
-    required String localStatus,
-    required RiderController rc,
-    required void Function(String newStatus) onSuccess,
+    required String liveStatus, // latest status from Firestore ('' = loading)
+    required bool busy,
+    required VoidCallback onPressed,
   }) {
-    final currentIndex = _statusStepIndex(localStatus);
-    final targetIndex = _statusStepIndex(targetStatus);
+    // -1 = not part of the delivery flow (loading, Undelivered, Cancelled...)
+    final currentIndex = _statusSequence.indexOf(liveStatus);
+    final targetIndex = _statusSequence.indexOf(targetStatus);
 
-    final bool isDone = currentIndex >= targetIndex;
-    // 👈 FIX: no more `started &&` gate — ON THE WAY (the first button,
-    // targetIndex 1) is active as soon as currentIndex is 0 (Accepted).
-    // Orders still saved with an old 'Picked Up' status also count as 0, so
-    // they can go straight to ON THE WAY.
-    final bool isActive = !isDone && currentIndex == targetIndex - 1;
+    final bool isDone = currentIndex != -1 && currentIndex >= targetIndex;
+    final bool isActive =
+        !busy && currentIndex != -1 && currentIndex == targetIndex - 1;
 
-    // Red until the rider taps it; orange once done. (The per-button
-    // `color` argument is no longer used for the fill.)
     Color background;
     Widget label_;
     if (isDone) {
@@ -1632,9 +1583,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         ),
       );
     } else {
-      background = _pendingRed.withValues(
-        alpha: 0.45,
-      ); // locked (not yet tappable)
+      background = _pendingRed.withValues(alpha: 0.45);
       label_ = Text(
         label,
         style: TextStyle(
@@ -1658,21 +1607,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
           ),
           elevation: isActive ? 4 : 0,
         ),
-        onPressed: isActive
-            ? () async {
-                final success = await rc.updateOrderStatus(
-                  orderId,
-                  targetStatus,
-                );
-                if (!context.mounted) return;
-                if (success) {
-                  onSuccess(targetStatus);
-                  _showTopBanner(context, 'Order marked as $label');
-                } else {
-                  _showTopBanner(context, 'Failed to update status');
-                }
-              }
-            : null,
+        onPressed: isActive ? onPressed : null,
         child: label_,
       ),
     );
