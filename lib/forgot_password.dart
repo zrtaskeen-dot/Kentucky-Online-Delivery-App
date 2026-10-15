@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class ForgotPassword extends StatefulWidget {
@@ -14,12 +15,12 @@ class _ForgotPasswordState extends State<ForgotPassword> {
   bool _isLoading = false;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // 👈 Baki screens (profile etc.) wali theme: white + maroon + cream card
+  
   static const bg = Colors.white;
   static const primary = Color(0xFFA70000);
   static const cardColor = Color(0xFFFFFDFA);
 
-  // Same message colors as Login / Sign Up screens
+  
   static const Color successBorder = Color(0xFF4A7C59);
   static const Color successBg = Color(0xFFEAF3ED);
   static const Color successText = Color(0xFF2F5B3E);
@@ -27,14 +28,20 @@ class _ForgotPasswordState extends State<ForgotPassword> {
   static const Color errorBg = Color(0xFFFDECEA);
   static const Color errorText = Color(0xFFB71C1C);
 
-  // Only Gmail addresses are allowed
-  String? _emailError(String? value) {
-    final v = value?.trim().toLowerCase() ?? '';
-    if (v.isEmpty) return 'Please enter your email address';
+  static final RegExp _emailRegex = RegExp(
+    r'^[a-zA-Z0-9]+([._%+\-][a-zA-Z0-9]+)*@(gmail|yahoo|hotmail|outlook)\.com$',
+    caseSensitive: false,
+  );
 
-    final gmailRegex = RegExp(r'^[a-z0-9._%+\-]+@gmail\.com$');
-    if (!gmailRegex.hasMatch(v)) {
-      return 'Only @gmail.com is allowed';
+  static final List<TextInputFormatter> _emailInputFormatters = [
+    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9._%+\-@]')),
+  ];
+
+  String? _emailError(String? value) {
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return 'Please enter your email address';
+    if (!_emailRegex.hasMatch(v)) {
+      return 'Use Gmail, Yahoo, Hotmail or Outlook';
     }
     return null;
   }
@@ -223,6 +230,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
                       label: 'Email',
                       icon: Icons.email_outlined,
                       keyboardType: TextInputType.emailAddress,
+                      inputFormatters: _emailInputFormatters,
                       validator: (value) {
                         return _emailError(value);
                       },
@@ -277,6 +285,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
     String? Function(String?)? validator,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     OutlineInputBorder border(Color color, [double width = 1.0]) =>
         OutlineInputBorder(
@@ -287,6 +296,7 @@ class _ForgotPasswordState extends State<ForgotPassword> {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       validator: validator,
       style: const TextStyle(
         fontSize: 15,

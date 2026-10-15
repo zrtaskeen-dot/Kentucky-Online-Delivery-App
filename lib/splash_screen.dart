@@ -129,7 +129,7 @@ class _SplashScreenState extends State<SplashScreen>
 
         if (userDoc.exists) {
           final data = userDoc.data();
-          
+
           final String roleId = (data?['roleId'] ?? '').toString();
           final String legacyRole = (data?['role'] ?? '')
               .toString()
@@ -159,7 +159,6 @@ class _SplashScreenState extends State<SplashScreen>
       }
     }
 
-    
     final prefs = await SharedPreferences.getInstance();
     final seenOnboarding = prefs.getBool('has_seen_onboarding') ?? false;
 
@@ -329,19 +328,21 @@ class _SplashScreenState extends State<SplashScreen>
         children: [
           Center(
             child: Container(
-              width: 116,
-              height: 116,
+              width: 124,
+              height: 124,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: RadialGradient(
-                  colors: [maroon.withValues(alpha: 0.10), maroon.withValues(alpha: 0.02)],
+                  colors: [
+                    maroon.withValues(alpha: 0.10),
+                    maroon.withValues(alpha: 0.02),
+                  ],
                 ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(8),
+              child: ClipOval(
                 child: Image.asset(
                   'assets/kentucky_logo.png',
-                  fit: BoxFit.contain,
+                  fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) => const Icon(
                     Icons.restaurant_menu_rounded,
                     color: maroon,

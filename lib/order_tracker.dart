@@ -1,5 +1,5 @@
-// ignore_for_file: unused_element, unused_field, unused_local_variable
 
+// ignore_for_file: unused_element, unused_field, unused_local_variable
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -18,7 +18,7 @@ class CustomerOrderTrackerScreen extends StatefulWidget {
 
 class _CustomerOrderTrackerScreenState
     extends State<CustomerOrderTrackerScreen> {
-  final bool _isDialogShown = false;
+ 
   StreamSubscription<DocumentSnapshot>? _orderSubscription;
 
   @override

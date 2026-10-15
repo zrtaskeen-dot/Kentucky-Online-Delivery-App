@@ -18,11 +18,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
 
-  // Live popup: watches the same 'notifications' query as the badge and
-  // pops a top banner for any notification that arrives WHILE the app is
-  // open (the first snapshot — notifications that already existed when
-  // the screen loaded — is skipped so old unread items don't all pop up
-  // at once on launch).
+  
   StreamSubscription<QuerySnapshot>? _notifSub;
   bool _skippedInitialNotifSnapshot = false;
   OverlayEntry? _bannerEntry;
@@ -47,8 +43,7 @@ class _MainScreenState extends State<MainScreen> {
         .snapshots()
         .listen((snap) {
           if (!_skippedInitialNotifSnapshot) {
-            // Don't pop a banner for whatever was already the latest
-            // notification when this screen first mounted.
+           
             _skippedInitialNotifSnapshot = true;
             return;
           }
@@ -86,7 +81,7 @@ class _MainScreenState extends State<MainScreen> {
               onTap: () {
                 _bannerEntry?.remove();
                 _bannerEntry = null;
-                setState(() => _currentIndex = 2); // jump to Notifications tab
+                setState(() => _currentIndex = 2); 
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(
@@ -176,13 +171,13 @@ class _MainScreenState extends State<MainScreen> {
     super.dispose();
   }
 
-  // 👈 Unified brand palette: maroon + orange + white/cream
+  
   static const Color _maroon = Color(0xFFA70000);
   static const Color _maroonDark = Color(0xFF7A0000);
   static const Color _orange = Color(0xFFFF8A00);
   static const Color _cream = Color(0xFFFFFDF2);
 
-  // 👈 CHANGED: Track tab (SizedBox) hata diya gaya hai, ab sirf 4 screens hain
+ 
   final List<Widget> _screens = [
     const HomeScreen(),
     OrderHistoryScreen(),
@@ -190,8 +185,7 @@ class _MainScreenState extends State<MainScreen> {
     const ProfileScreen(),
   ];
 
-  // Selected icon design — orange circle with a soft glow, white icon on top
-  // so it pops against the maroon bar.
+  
   Widget selectedIcon(IconData icon) {
     return Container(
       width: 44,
@@ -212,15 +206,12 @@ class _MainScreenState extends State<MainScreen> {
     );
   }
 
-  // Normal icon design — soft cream so it stays readable on the maroon bar
+  
   Widget unselectedIcon(IconData icon) {
     return Icon(icon, color: _cream.withValues(alpha: 0.75), size: 22);
   }
 
-  // Notification icon (selected or not) with an unread-count badge.
-  // Counts BOTH this user's own notifications and store-wide 'ALL'
-  // broadcasts — matching the same query NotificationScreen uses, so the
-  // badge number always matches what the user sees when they open it.
+  
   Widget _notificationIconWithBadge({
     required bool selected,
     required String? currentUserId,
@@ -239,13 +230,7 @@ class _MainScreenState extends State<MainScreen> {
         int unreadCount = 0;
 
         if (snapshot.hasData) {
-          // Mirrors NotificationScreen's filtering exactly, so the badge
-          // number always matches what actually shows up in the list:
-          // - hiddenFor: skip anything this user "deleted" from their list.
-          // - 'ALL' broadcasts sent before this account existed never show
-          //   in the list either — without this check they still counted
-          //   toward the badge, which is why a "1" could sit there with no
-          //   unread notification actually visible to the user.
+         
           unreadCount = snapshot.data!.docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>? ?? {};
             final hiddenFor = List<String>.from(data['hiddenFor'] ?? const []);
@@ -310,7 +295,7 @@ class _MainScreenState extends State<MainScreen> {
 
       body: IndexedStack(index: _currentIndex, children: _screens),
 
-      // Bottom Navigation Bar — plain rectangle, flush with the screen
+      // Bottom Navigation Bar 
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           gradient: const LinearGradient(

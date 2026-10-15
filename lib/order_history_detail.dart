@@ -166,12 +166,12 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     return s;
   }
 
-  String get _name => (data['customerName'] ?? data['name'] ?? '—').toString();
+  String get _name => (data['customerName'] ??  '—').toString();
 
-  String get _phone => (data['phone'] ?? data['phoneNumber'] ?? '—').toString();
+  String get _phone => (data['phone'] ?? '—').toString();
 
   String get _address =>
-      (data['deliveryAddress'] ?? data['address'] ?? '—').toString();
+      (data['deliveryAddress']  ?? '—').toString();
 
   String get _deliveryTime => (data['deliveryTime'] ?? '—').toString();
 

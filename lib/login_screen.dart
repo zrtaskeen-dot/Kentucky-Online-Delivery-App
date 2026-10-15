@@ -62,7 +62,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return 'Enter your email';
     if (!_emailRegex.hasMatch(v)) {
-      return 'Use a valid Gmail, Yahoo, Hotmail or Outlook email';
+      return 'Use Gmail, Yahoo, Hotmail or Outlook';
     }
     return null;
   }
@@ -349,7 +349,9 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        
+        // NEW: besides emailVerified, fill in any profile fields that are
+        // missing (accounts created before the sign-up fix only had the
+        // FCM token). Existing values are never overwritten.
         final profileFix = <String, dynamic>{'emailVerified': true};
         final hasName =
             (userData['name'] ?? '').toString().isNotEmpty ||
@@ -544,8 +546,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             () => _obscurePassword = !_obscurePassword,
                           ),
                         ),
-                        validator: (v) => v != null && v.length < 6
-                            ? 'Min 6 characters'
+                        validator: (v) => v != null && v.length < 8
+                            ? 'Min 8 characters'
                             : null,
                       ),
                       Align(

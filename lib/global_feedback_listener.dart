@@ -2,21 +2,15 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-// Update this import path to match where you keep the tracker file.
+
 import 'order_tracker.dart' show OrderFeedbackDialog;
 import 'notification_service.dart';
 import 'main.dart'show navigatorKey;
 
-// AuthWrapper sets this to true the moment the customer's home screen is
-// actually on screen (i.e. splash / onboarding / login are finished), and
-// back to false when it goes away. The feedback popup waits for this signal
-// instead of guessing how long the splash screen takes.
+
 final ValueNotifier<bool> customerHomeReady = ValueNotifier<bool>(false);
 
-// Parses delivery_type.dart's "6 Sep 2026 at 05:30 PM" schedule label
-// back into a DateTime — same format/parsing rules as
-// order_history_detail.dart's `_scheduledDateTime` getter. Returns null
-// if it can't be parsed (or isn't actually a scheduled label at all).
+
 DateTime? _parseScheduledDateTime(String deliveryTime) {
   if (deliveryTime == "Standard Delivery") return null;
   try {
@@ -62,10 +56,7 @@ DateTime? _parseScheduledDateTime(String deliveryTime) {
   }
 }
 
-// An order document can carry both 'orderStatus' (camelCase) and the
-// legacy 'order_status' (snake_case) with different values, e.g.
-// orderStatus: 'pending' / order_status: 'Assigned'. Trust whichever one
-// isn't still sitting at the just-created 'pending' default.
+
 String _resolveStatus(Map<String, dynamic> data) {
   final camel = (data['orderStatus'] ?? '').toString().toLowerCase();
   final snake = (data['order_status'] ?? '').toString().toLowerCase();
@@ -74,35 +65,11 @@ String _resolveStatus(Map<String, dynamic> data) {
   return camel.isNotEmpty ? camel : snake;
 }
 
-// ==========================================
-// GLOBAL FEEDBACK + PAYMENT-REMINDER LISTENER
-//
-// Mount this ONCE, wrapping the customer app's shell (main.dart) so it
-// stays active no matter which screen the customer is on.
-//
-// 1. FEEDBACK: watches the signed-in customer's orders that are
-//    delivered and have isFeedbackSubmitted == false, and shows one
-//    feedback popup at a time — queuing the rest so a customer with
-//    several orders delivered the same day gets a popup for each.
-//
-// 2. PAYMENT REMINDER: for each scheduled ('Deliver Later'), online-
-//    payment order that has no receipt yet, the moment it enters its
-//    1h30m-before-delivery upload window, sends a one-time in-app
-//    notification. Only orders that checkout flagged with
-//    paymentReminderSent == false are considered (older orders without
-//    the field are left alone), and nothing is sent once the scheduled
-//    time has passed, since the window is closed by then.
-//
-// AUTH-AWARE: everything is tied to whoever is signed in RIGHT NOW. When
-// the user logs out / switches account (e.g. customer -> rider), the
-// old subscriptions are cancelled and the queue is cleared, so a rider
-// can never be shown a customer's feedback popup. Rider accounts get no
-// subscriptions at all.
-//
-// The status is matched client-side (both status fields, case-
-// insensitive), so this query needs no composite index: it filters only
-// on customerId + isFeedbackSubmitted equality.
-// ==========================================
+
+
+
+
+
 class GlobalFeedbackListener extends StatefulWidget {
   final Widget child;
 
@@ -116,25 +83,20 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
   StreamSubscription<User?>? _authSubscription;
   String? _activeUserId;
 
-  // ── Feedback ──
+ 
   StreamSubscription<QuerySnapshot>? _ordersSubscription;
   final List<String> _pendingOrderIds = [];
   bool _isDialogShowing = false;
 
-  // Popups are held back until the customer's home screen is really on
-  // screen (customerHomeReady, set by AuthWrapper). Showing a dialog while
-  // the splash is still playing was the bug: the splash then navigated away
-  // and took the dialog with it before the customer could type anything.
-  // Queued orders are simply held until ready; nothing is lost.
+  
   bool _homeReady = false;
 
-  // Safety net: if the home screen is reached some way that never signals
-  // (so customerHomeReady stays false), allow popups after this long anyway.
+  
   bool _fallbackElapsed = false;
 
   bool get _readyToShowDialogs => _homeReady || _fallbackElapsed;
 
-  // ── Payment reminders ──
+  // Payment reminders 
   StreamSubscription<QuerySnapshot>? _paymentReminderSubscription;
   Timer? _paymentReminderTicker;
   Map<String, Map<String, dynamic>> _paymentReminderCandidates = {};
@@ -163,7 +125,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
       _homeReady = false;
       return;
     }
-    // Let the screen transition finish before a dialog pops up over it.
+   
     Future.delayed(const Duration(milliseconds: 800), () {
       if (!mounted || !customerHomeReady.value) return;
       _homeReady = true;
@@ -191,22 +153,20 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
   }
 
   Future<void> _onAuthChanged(User? user) async {
-    // Whoever was signed in before is gone — drop their subscriptions and
-    // any queued popups before anything else.
+   
     _stopListening();
     _activeUserId = user?.uid;
     if (user == null) return;
 
     if (await _isRider(user.uid)) return;
-    // The account may have changed again while we were checking the role.
+   
     if (!mounted || _activeUserId != user.uid) return;
 
     _listenForDeliveredOrders(user.uid);
     _listenForPaymentReminders(user.uid);
   }
 
-  // Riders share the 'users' collection with customers. They have no
-  // customer orders, and must never get customer popups/reminders.
+  
   Future<bool> _isRider(String uid) async {
     try {
       final doc = await FirebaseFirestore.instance
@@ -214,7 +174,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
           .doc(uid)
           .get();
       final data = doc.data();
-      if (data == null) return false; // e.g. guest — treat as customer
+      if (data == null) return false; 
       final roleId = (data['roleId'] ?? '').toString();
       final legacyRole = (data['role'] ?? '').toString().toLowerCase();
       return roleId == 'R002' || legacyRole == 'rider';
@@ -224,7 +184,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
     }
   }
 
-  // ── FEEDBACK ────────────────────────────────────────────────────
+  //  Feedback for delivered orders
 
   void _listenForDeliveredOrders(String userId) {
     _ordersSubscription = FirebaseFirestore.instance
@@ -249,12 +209,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
       return;
     }
 
-    // This widget now lives ABOVE the app's Navigator (mounted via
-    // MaterialApp's `builder`, see main.dart), so its own `context`
-    // doesn't have a Navigator ancestor to show a dialog on — using the
-    // app-wide navigatorKey instead reaches the Navigator directly,
-    // works no matter which screen is currently on top, and doesn't
-    // depend on this widget's own BuildContext at all.
+    
     final dialogContext = navigatorKey.currentContext;
     if (dialogContext == null) return;
 
@@ -274,12 +229,11 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
     debugPrint('GlobalFeedbackListener: closed popup for order $orderId');
     _isDialogShowing = false;
 
-    // Show the next queued popup, if the customer had more than
-    // one order delivered without feedback.
+    
     _tryShowNextDialog();
   }
 
-  // ── PAYMENT REMINDERS ───────────────────────────────────────────
+  // Payment Reminder
 
   void _listenForPaymentReminders(String userId) {
     _paymentReminderSubscription = FirebaseFirestore.instance
@@ -299,8 +253,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
           _checkPaymentReminders(userId);
         });
 
-    // Crossing a time threshold isn't a Firestore change, so re-check on
-    // a timer (runs while the app process is alive).
+    
     _paymentReminderTicker = Timer.periodic(
       const Duration(minutes: 1),
       (_) => _checkPaymentReminders(userId),
@@ -308,9 +261,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
   }
 
   bool _isPaymentReminderCandidate(Map<String, dynamic> data) {
-    // Only orders checkout explicitly flagged as "reminder not sent yet".
-    // Older orders without the field are skipped instead of suddenly
-    // notifying about them.
+    
     if (data['paymentReminderSent'] != false) return false;
 
     if (_pastStatuses.contains(_resolveStatus(data))) return false;
@@ -343,17 +294,14 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
       final DateTime? scheduledAt = _parseScheduledDateTime(deliveryTime);
       if (scheduledAt == null) continue;
 
-      // Window = [scheduled - 1h30m, scheduled). Not open yet -> wait.
-      // Already closed -> the receipt can no longer be uploaded, so a
-      // "payment now available" message would be wrong; drop it.
+      
       if (now.isBefore(scheduledAt.subtract(_receiptWindow))) continue;
       if (!now.isBefore(scheduledAt)) {
         _paymentReminderCandidates.remove(orderId);
         continue;
       }
 
-      // Remove from the local cache first so an overlapping tick or
-      // snapshot can't fire this twice while the write is in flight.
+      
       _paymentReminderCandidates.remove(orderId);
 
       final String shortId = orderId
@@ -361,8 +309,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
           .toUpperCase();
 
       try {
-        // Flip the flag first so a failure below can never cause repeat
-        // notifications.
+       
         await FirebaseFirestore.instance
             .collection('orders')
             .doc(orderId)
@@ -373,7 +320,7 @@ class _GlobalFeedbackListenerState extends State<GlobalFeedbackListener> {
           title: "Payment Now Available",
           body:
               "You can now upload your payment receipt for order #$shortId. "
-              "Please complete the payment — your order will only be "
+              "Please complete the payment-your order will only be "
               "confirmed once payment is received.",
         );
       } catch (e) {

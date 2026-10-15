@@ -24,14 +24,7 @@ double readItemQuantity(Map<String, dynamic> item) {
 
 
 double computeOrderTotal(Map<String, dynamic> orderData, List<Map<String, dynamic>> items) {
-  final raw = orderData['totalAmount'] ??
-      orderData['total_bill'] ??
-      orderData['totalPrice'] ??
-      orderData['total'] ??
-      orderData['grandTotal'] ??
-      orderData['finalAmount'] ??
-      orderData['orderTotal'] ??
-      orderData['amount'];
+  final raw = orderData['totalAmount'] ;
   final t = readPriceValue(raw);
   if (t > 0) return t;
 

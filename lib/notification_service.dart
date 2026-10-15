@@ -92,7 +92,7 @@ class NotificationService {
     });
   }
 
-  /// Sends an in-app notification to ALL customers.
+  /// Sends an in-app notification to ALL customers
  
   static Future<void> broadcastToAllCustomers({
     required String title,
@@ -193,7 +193,7 @@ class NotificationService {
           'hiddenFor': FieldValue.arrayUnion([customerId]),
         });
       } else {
-        // This customer's own notification, delete it from Firestore.
+        //  customer's own notification delete it from Firestore
         batch.delete(doc.reference);
       }
     }

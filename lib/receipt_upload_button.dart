@@ -102,7 +102,7 @@ class _ReceiptUploadButtonState extends State<ReceiptUploadButton> {
       if (!mounted) return;
       setState(() {
         _bannerIsError = true;
-        _bannerMessage = "Time's up — this order can no longer be confirmed.";
+        _bannerMessage = "Time's up-this order can no longer be confirmed.";
       });
       return;
     }

@@ -23,14 +23,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   GoogleMapController? _mapController;
 
-  // Custom blue "dot" used for the rider's live location. A Marker icon keeps
-  // the same pixel size at every zoom level, so the rider never disappears
-  // when the map zooms out (a meters-based Circle alone would).
+ 
   BitmapDescriptor? _riderDotIcon;
 
-  // The camera is fitted to "rider + delivery address" only ONCE. After that
-  // the rider dot just moves, so the customer can zoom/pan freely without the
-  // map snapping back on every location update. The recenter button re-fits.
+ 
   bool _initialFitDone = false;
 
   @override
@@ -51,15 +47,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     final canvas = Canvas(recorder);
     const center = Offset(size / 2, size / 2);
 
-    // Soft outer halo
+    
     canvas.drawCircle(
       center,
       size / 2,
       Paint()..color = Colors.blue.withValues(alpha: 0.25),
     );
-    // White ring
+    
     canvas.drawCircle(center, size / 3.2, Paint()..color = Colors.white);
-    // Solid blue dot
+    
     canvas.drawCircle(center, size / 4, Paint()..color = Colors.blue);
 
     final picture = recorder.endRecording();
@@ -78,10 +74,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     String? riderId,
     String? savedPhone,
   ) async {
-    // The order stores the rider's id. Their number is read from that rider's
-    // own profile (users/{riderId}.phone) — NOT from the order's `phone`,
-    // which is the customer's number. A phone copied onto the order when the
-    // rider accepted it (riderPhone) is only the fallback.
+    
     String? phone;
     if (riderId != null && riderId.isNotEmpty) {
       try {
@@ -121,8 +114,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     }
   }
 
-  // If the rider moves out of the visible part of the map, pan the camera so
-  // the customer keeps seeing the rider (without resetting their zoom).
+ 
   Future<void> _keepRiderInView(LatLng rider) async {
     final controller = _mapController;
     if (controller == null) return;
@@ -138,7 +130,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     final controller = _mapController;
     if (controller == null) return;
 
-    // Only the rider is known (or both are at the same spot): just center.
+    
     if (destLatLng == null || destLatLng == riderLatLng) {
       controller.animateCamera(CameraUpdate.newLatLngZoom(riderLatLng, 16));
       return;
@@ -204,23 +196,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
           final data = snapshot.data!.data() as Map<String, dynamic>;
 
-          // The rider app writes "orderStatus" (camelCase); the old
-          // "order_status" is only kept as a fallback for very old orders.
+         
           final String status =
               (data['orderStatus'] ?? data['order_status'] ?? 'Accepted')
                   .toString();
 
-          // Rider live location (written by the rider app).
+          // Rider live location written by the rider app
           final double? riderLat = (data['riderLat'] as num?)?.toDouble();
           final double? riderLng = (data['riderLng'] as num?)?.toDouble();
-          // Customer's delivery address location (saved when the order was placed).
+          // Customer's delivery address location saved when the order was placed
           final double? destLat = (data['latitude'] as num?)?.toDouble();
           final double? destLng = (data['longitude'] as num?)?.toDouble();
 
           final String riderName = (data['riderName'] ?? 'Rider').toString();
           // The rider's phone is saved on the order when the rider accepts it
-          // (RiderController.acceptOrder). NOTE: 'phone_number' on an order is
-          // the CUSTOMER's own number, so it must never be used for the rider.
+         
           final String? riderPhone = data['riderPhone']?.toString();
           final String? riderId = data['riderId']?.toString();
 
@@ -241,8 +231,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               : null;
 
 
-          // Fit the camera the first time only (map may not exist yet on the
-          // very first build - onMapCreated handles that case).
           if (!_initialFitDone && _mapController != null) {
             _initialFitDone = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -276,7 +264,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                       },
                       myLocationButtonEnabled: false,
                       zoomControlsEnabled: false,
-                      // Rider = circle (blue dot with a soft halo) that moves live.
+                     
                       circles: {
                         Circle(
                           circleId: const CircleId('rider_halo'),
@@ -288,7 +276,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         ),
                       },
                       markers: {
-                        // Rider dot: always visible at any zoom level.
+                        // Rider dot on map
                         Marker(
                           markerId: const MarkerId('rider'),
                           position: riderLatLng,
@@ -301,7 +289,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                           flat: true,
                           infoWindow: InfoWindow(title: 'Rider: $riderName'),
                         ),
-                        // Customer = red pin at the delivery address.
+                        // Customer  red pin on map
                         if (destLatLng != null)
                           Marker(
                             markerId: const MarkerId('destination'),

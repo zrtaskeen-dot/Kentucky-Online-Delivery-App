@@ -229,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     for (final docs in results) {
       for (final doc in docs) {
-        if (!counted.add(doc.id)) continue; // never count an order twice
+        if (!counted.add(doc.id)) continue; 
         final data = doc.data();
         if (!_isCountableDelivered(data)) continue;
 

@@ -90,7 +90,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return 'Enter your email';
     if (!_emailRegex.hasMatch(v)) {
-      return 'Use a valid Gmail, Yahoo, Hotmail or Outlook email';
+      return 'Use Gmail, Yahoo, Hotmail or Outlook';
     }
     return null;
   }

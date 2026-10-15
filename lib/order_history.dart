@@ -38,14 +38,7 @@ double _computeOrderTotal(
   List<Map<String, dynamic>> items,
 ) {
   final raw =
-      orderData['totalAmount'] ??
-      orderData['total_bill'] ??
-      orderData['totalPrice'] ??
-      orderData['total'] ??
-      orderData['grandTotal'] ??
-      orderData['finalAmount'] ??
-      orderData['orderTotal'] ??
-      orderData['amount'];
+      orderData['totalAmount'] ;
   final t = _readPriceValue(raw);
   if (t > 0) return t;
 
@@ -432,12 +425,12 @@ class _OrderCard extends StatelessWidget {
   double get _total => _computeOrderTotal(data, _items);
 
   String get _status =>
-      (data['orderStatus'] ?? data['order_status'] ?? 'pending')
+      (data['orderStatus'] ??  'pending')
           .toString()
           .toLowerCase();
 
   String get _dateLabel {
-    final ts = data['createdAt'] ?? data['order_date'];
+    final ts = data['createdAt'] ;
     if (ts is Timestamp) {
       return _formatPakistaniDateTime(ts.toDate());
     }
@@ -445,10 +438,10 @@ class _OrderCard extends StatelessWidget {
   }
 
   String get _deliveryTime =>
-      (data['deliveryTime'] ?? data['delivery_time'] ?? '—').toString();
+      (data['deliveryTime']  ?? '—').toString();
 
   String get _paymentMethod =>
-      (data['paymentMethod'] ?? data['payment_method'] ?? '—').toString();
+      (data['paymentMethod']  ?? '—').toString();
 
   bool get _isScheduled => _deliveryTime != "Standard Delivery";
 
