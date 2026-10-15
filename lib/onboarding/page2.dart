@@ -21,7 +21,7 @@ class OnboardPage2 extends StatelessWidget {
       onHorizontalDragEnd: (details) {
         final velocity = details.primaryVelocity ?? 0;
         if (velocity < 0) {
-          _skipOnboardingTo(context, const OnboardPage3());
+          _continueTo(context, const OnboardPage3());
         } else if (velocity > 0) {
           Navigator.pop(context);
         }
@@ -127,7 +127,7 @@ class OnboardPage2 extends StatelessWidget {
                   height: 56,
                   child: ElevatedButton(
                     onPressed: () =>
-                        _skipOnboardingTo(context, const OnboardPage3()),
+                        _continueTo(context, const OnboardPage3()),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: accentOrange,
                       foregroundColor: Colors.white,
@@ -171,13 +171,20 @@ Future<void> _skipOnboardingTo(BuildContext context, Widget page) async {
   Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => page));
 }
 
+Future<void> _continueTo(BuildContext context, Widget page) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setBool('has_seen_onboarding', true);
+  if (!context.mounted) return;
+  Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+}
+
 Widget _buildOnboardProgressBar(int activeIndex) {
   return Row(
-    children: List.generate(3, (i) {
+    children: List.generate(2, (i) {
       return Expanded(
         child: Container(
           height: 4,
-          margin: EdgeInsets.only(right: i == 2 ? 0 : 6),
+          margin: EdgeInsets.only(right: i == 1 ? 0 : 6),
           decoration: BoxDecoration(
             color: i == activeIndex
                 ? _onboardOrange

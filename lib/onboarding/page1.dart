@@ -96,6 +96,7 @@ class OnboardPage1 extends StatelessWidget {
                 const SizedBox(height: 8),
                 Expanded(
                   child: _buildOnboardHero(
+                    imageScale: 0.78,
                     imageUrl:
                         "https://res.cloudinary.com/dqjqkwwwh/image/upload/v1765083671/pizza1_lrqaal.png",
                     badges: [
@@ -177,11 +178,11 @@ Future<void> _skipOnboardingTo(BuildContext context, Widget page) async {
 
 Widget _buildOnboardProgressBar(int activeIndex) {
   return Row(
-    children: List.generate(3, (i) {
+    children: List.generate(2, (i) {
       return Expanded(
         child: Container(
           height: 4,
-          margin: EdgeInsets.only(right: i == 2 ? 0 : 6),
+          margin: EdgeInsets.only(right: i == 1 ? 0 : 6),
           decoration: BoxDecoration(
             color: i == activeIndex
                 ? _onboardOrange
@@ -249,13 +250,14 @@ Widget _buildOnboardIconBadge({
 Widget _buildOnboardHero({
   required String imageUrl,
   required List<Widget> badges,
+  double imageScale = 0.66,
 }) {
   return LayoutBuilder(
     builder: (context, constraints) {
       final double side = math.min(constraints.maxWidth, constraints.maxHeight);
-      final double imageSize = side * 0.66;
-      final double ring1 = side * 0.78;
-      final double ring2 = side * 0.92;
+      final double imageSize = side * imageScale;
+      final double ring1 = side * (imageScale + 0.12);
+      final double ring2 = math.min(side * (imageScale + 0.26), side * 0.98);
 
       return Center(
         child: SizedBox(
