@@ -16,10 +16,10 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   static const bgColor = Colors.white;
-  static const primary = Color(0xFFA70000); // Maroon Color
+  static const primary = Color(0xFFA70000); 
   static const cardColor = Color(0xFFFFFDFA);
 
-  // Cloudinary credentials
+  
   static const String _cloudinaryUrl =
       "https://api.cloudinary.com/v1_1/dqjqkwwwh/image/upload";
   static const String _profileUploadPreset = "payment_receipts";
@@ -767,6 +767,7 @@ class _TermsAndConditionsScreen extends StatelessWidget {
           '4. Scheduled orders can be cancelled up to 1 hour and 30 minutes before delivery. After that, cancellation is not allowed.\n\n'
           '5. For scheduled online payments, upload your payment receipt in the app. Payment opens 1 hour and 30 minutes before delivery. Without a receipt, your order will not be confirmed or delivered.\n\n'
           '6. Your name, phone number, and address are used only for order processing and delivery.\n\n',
+          
           style: TextStyle(fontSize: 14, height: 1.6, color: Colors.black87),
         ),
       ),

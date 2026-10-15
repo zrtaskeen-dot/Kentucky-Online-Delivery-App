@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import 'cart_provider.dart'; 
 import 'main_navigation.dart'; 

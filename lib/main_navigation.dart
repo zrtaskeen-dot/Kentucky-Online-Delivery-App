@@ -56,7 +56,7 @@ class _MainScreenState extends State<MainScreen> {
 
           for (final change in snap.docChanges) {
             if (change.type != DocumentChangeType.added) continue;
-            final data = change.doc.data() as Map<String, dynamic>? ?? {};
+            final data = change.doc.data() ?? {};
             final hiddenFor = List<String>.from(data['hiddenFor'] ?? const []);
             if (hiddenFor.contains(uid)) continue;
             _showNotificationBanner(

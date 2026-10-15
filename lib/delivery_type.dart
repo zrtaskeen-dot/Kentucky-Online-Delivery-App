@@ -1,3 +1,4 @@
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -40,7 +41,6 @@ class DeliveryScreen extends StatefulWidget {
 class _DeliveryScreenState extends State<DeliveryScreen> {
   static const bgColor = Colors.white;
   static const primary = Color(0xFFA62600);
-  static const creamText = Color(0xFFFEF9E7);
   static const fieldBg = Color(0xFFFFFDFA);
 
   String _deliveryMode = '';
@@ -65,14 +65,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  bool get _isScheduledWithinOneAndHalfHours {
-    final dt = _scheduledDateTime;
-    if (dt == null) return false;
-    return dt.difference(DateTime.now()) <= const Duration(minutes: 90);
-  }
-  // NOTE: retained for potential future use, but no longer drives the
-  // receipt-upload flow — Deliver Later now always defers the receipt to
-  // the My Orders screen (see handleOrderConfirmation / _buildPaymentSelector).
+  
 
   File? _imageFile;
   final ImagePicker _picker = ImagePicker();
@@ -80,13 +73,12 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
       TextEditingController();
   final FirestoreService _firestoreService = FirestoreService();
 
-  // EasyPaisa / JazzCash numbers come from Firestore: payment_method/{branchId}
-  // with fields 'easyPaisaNumber' and 'jazzCashNumber'.
+  // EasyPaisa / JazzCash numbers  from Firestore
   String _easyPaisaNumber = '';
   String _jazzCashNumber = '';
   bool _loadingPaymentNumbers = false;
 
-  // Number to pay, according to the provider the user selected.
+ 
   String get _receiverPhone {
     if (_selectedProvider == 'EasyPaisa') return _easyPaisaNumber;
     if (_selectedProvider == 'JazzCash') return _jazzCashNumber;
@@ -291,10 +283,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  // Success/error colors match the same scheme used on the sign-up screen
-  // (green for success, red for error) so feedback looks consistent across
-  // the app. isError defaults to true since most existing call sites here
-  // are reporting a validation problem or a failure.
+  
   static const Color _successBorder = Color(0xFF4A7C59);
   static const Color _successBg = Color(0xFFEAF3ED);
   static const Color _successText = Color(0xFF2F5B3E);
@@ -369,9 +358,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     return weekdays[date.weekday - 1];
   }
 
-  // Generates delivery-time slots (every 30 min) within operating hours.
-  // Restaurant operating hours as (open, close) TimeOfDay, falling back
-  // to a sane default if the fetched timing string can't be parsed.
+  
   (TimeOfDay, TimeOfDay) _operatingHours() {
     TimeOfDay open = const TimeOfDay(hour: 9, minute: 0);
     TimeOfDay close = const TimeOfDay(hour: 23, minute: 0);
@@ -396,15 +383,14 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     int selectedMins = selected.hour * 60 + selected.minute;
 
     if (closeMins <= openMins) {
-      // Wraps past midnight (e.g. "6 PM to 2 AM").
+      
       closeMins += 24 * 60;
       if (selectedMins < openMins) selectedMins += 24 * 60;
     }
     return selectedMins >= openMins && selectedMins <= closeMins;
   }
 
-  // Custom bottom sheet, styled to match the rest of the app, so the
-  // Date/Time pickers no longer look like stock Material dialogs.
+  
   Widget _buildThemedPickerSheet({
     required String title,
     String? subtitle,
@@ -555,9 +541,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     if (picked != null) {
       setState(() {
         _scheduledDate = picked;
-        // The previously picked time was validated against the old
-        // date and may now be in the past (or otherwise invalid) for
-        // the newly picked date — clear it and make them re-pick.
+        
         _scheduledTime = null;
       });
     }
@@ -568,10 +552,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     final DateTime minAllowed = DateTime.now().add(const Duration(minutes: 90));
     final (openTime, _) = _operatingHours();
 
-    // Sensible starting position for the wheel: the currently picked
-    // time if there is one, else opening time — nudged forward to the
-    // earliest allowed instant if that falls before it (e.g. today,
-    // opening time has already passed).
+
     DateTime initial = DateTime(
       baseDate.year,
       baseDate.month,
@@ -616,18 +597,13 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                         initialDateTime: dialedTime,
                         onDateTimeChanged: (dt) => setSheetState(() {
                           dialedTime = dt;
-                          // Clear a stale error the moment they change
-                          // the dial — the old message no longer
-                          // necessarily applies to the new value.
+                         
                           errorText = null;
                         }),
                       ),
                     ),
                   ),
-                  // Shown INSIDE the sheet itself (not a SnackBar) so it
-                  // can never end up rendered behind the popup — a
-                  // SnackBar anchors to the Scaffold underneath, which
-                  // sits below this modal sheet's own overlay layer.
+                 
                   if (errorText != null) ...[
                     const SizedBox(height: 10),
                     Container(
@@ -782,8 +758,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     try {
       final userId =
           FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
-      // Sirf isi branch ke items delete karo jahan se order hua; doosri
-      // branches ke cart items mehfooz rehte hain.
+     
       final activeBranchId = Provider.of<CartProvider>(
         context,
         listen: false,
@@ -847,6 +822,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     }
 
     try {
+      // ignore: use_build_context_synchronously
       final cartProvider = Provider.of<CartProvider>(context, listen: false);
       String activeBranchId = cartProvider.selectedBranchId;
 
@@ -877,9 +853,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         receiptImageUrl: receiptImageUrl,
       );
 
-      // Keep the user's profile in sync with whatever phone/address they
-      // just used at checkout, so Profile always shows the latest values
-      // instead of relying on the old "copy from last order" fallback.
+     
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
         try {
@@ -890,8 +864,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             'lng': widget.selectedLocation.longitude,
           }, SetOptions(merge: true));
         } catch (e) {
-          // Non-fatal: the order itself already succeeded above, so we
-          // don't want a profile-sync hiccup to look like a failed order.
+          
           debugPrint('Failed to sync phone/address to profile: $e');
         }
       }
@@ -954,6 +927,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   Widget build(BuildContext context) {
     final int totalItemCount = widget.cartItems.fold(
       0,
+      // ignore: avoid_types_as_parameter_names
       (sum, item) => sum + item.quantity,
     );
 
@@ -1305,11 +1279,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             ],
           ),
         ),
-        // Deliver Now still shows who to pay + the receipt upload inline,
-        // right below the selector, once a provider's been chosen in the
-        // popup. Deliver Later needs neither here — the "pay 1.5h before
-        // delivery" note now lives inside the popup itself, and receipt
-        // upload happens later from My Orders.
+       
         if (!isLaterMode &&
             _paymentMode == 'Online' &&
             _selectedProvider != null) ...[
@@ -1322,10 +1292,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  // "Online Payment" no longer selects a provider by itself — tapping it
-  // opens the EasyPaisa/JazzCash picker popup instead. The subtitle below
-  // the title is the only inline confirmation of which provider is
-  // currently chosen, since the tile no longer expands into anything.
+  
   Widget _onlinePaymentTile({required bool isLaterMode}) {
     final bool isSelected = _paymentMode == 'Online';
     return InkWell(
@@ -1387,9 +1354,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  // Shared popup for both Deliver Now and Deliver Later — EasyPaisa /
-  // JazzCash choice. Deliver Later additionally shows the "pay 1.5h
-  // before delivery" note at the bottom.
   void _openProviderPicker({required bool isLaterMode}) {
     showModalBottomSheet(
       context: context,
@@ -1705,34 +1669,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           ],
         ),
         const SizedBox(height: 10),
-        // Container(
-        //   margin: const EdgeInsets.only(bottom: 10),
-        //   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        //   decoration: BoxDecoration(
-        //     color: primary.withValues(alpha: 0.06),
-        //     borderRadius: BorderRadius.circular(10),
-        //     border: Border.all(color: primary.withValues(alpha: 0.25)),
-        //   ),
-        //   child: const Row(
-        //     crossAxisAlignment: CrossAxisAlignment.start,
-        //     children: [
-        //       Icon(Icons.info_outline_rounded, size: 14, color: primary),
-        //       SizedBox(width: 8),
-        //       Expanded(
-        //         child: Text(
-        //           "Please upload a clear payment screenshot with the sender "
-        //           "name, phone number, amount, and payment details visible.",
-        //           style: TextStyle(
-        //             fontSize: 11,
-        //             fontWeight: FontWeight.w500,
-        //             color: Colors.black87,
-        //             height: 1.3,
-        //           ),
-        //         ),
-        //       ),
-        //     ],
-        //   ),
-        // ),
+       
         _imageFile != null
             ? _buildReceiptPreview()
             : GestureDetector(
@@ -1898,6 +1835,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
 
   double get _itemsSubtotal => widget.cartItems.fold(
     0.0,
+    // ignore: avoid_types_as_parameter_names
     (sum, item) => sum + (item.price * item.quantity),
   );
 
@@ -1936,8 +1874,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   Widget _buildSummaryBar(int totalItemCount) {
     final double itemsTotal = _itemsSubtotal;
     final double deliveryCharge = _deliveryChargeForDisplay;
-    // Already the grand total from CartScreen — not recomputed here, so the
-    // number the user agreed to at checkout never silently changes.
+    
     final double grandTotal = widget.totalAmount;
 
     return Container(
@@ -2136,10 +2073,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                         ],
                         _reviewSectionLabel("Items"),
                         const SizedBox(height: 6),
-                        // NOTE: assumes CartItem exposes a `name` getter,
-                        // matching how `item.quantity` is already used
-                        // elsewhere in this file. Adjust the field name
-                        // below if your CartItem model differs.
+                       
                         ...widget.cartItems.map(
                           (item) => Padding(
                             padding: const EdgeInsets.symmetric(vertical: 3),

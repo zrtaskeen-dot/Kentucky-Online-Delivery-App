@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:ui' as ui;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -30,8 +32,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   // the rider dot just moves, so the customer can zoom/pan freely without the
   // map snapping back on every location update. The recenter button re-fits.
   bool _initialFitDone = false;
-  LatLng? _lastRiderLatLng;
-  LatLng? _lastDestLatLng;
 
   @override
   void initState() {
@@ -240,8 +240,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               ? LatLng(destLat, destLng)
               : null;
 
-          _lastRiderLatLng = riderLatLng;
-          _lastDestLatLng = destLatLng;
 
           // Fit the camera the first time only (map may not exist yet on the
           // very first build - onMapCreated handles that case).

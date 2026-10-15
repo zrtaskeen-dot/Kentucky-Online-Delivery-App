@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -99,8 +101,7 @@ Future<void> _reorderItems(
   final userId = FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
   final cartProvider = Provider.of<CartProvider>(context, listen: false);
 
-  // Items already in the cart , so a reordered item
-  // that is already there just gets its quantity increased.
+ 
   final cartSnap = await FirebaseFirestore.instance
       .collection('carts')
       .where('userId', isEqualTo: userId)
@@ -168,8 +169,7 @@ class OrderHistoryScreen extends StatelessWidget {
   static const Color cardColor = Color(0xFFFFFDFA);
   static const Color outlineColor = Color(0x33A70000);
 
-  // Orders in these statuses are finished: they leave Active Orders, go to
-  // Order History, and no longer show the Track Order button.
+  
   static const List<String> _pastStatuses = [
     'delivered',
     'cancelled',
@@ -259,7 +259,7 @@ class OrderHistoryScreen extends StatelessWidget {
               if (activeDocs.isNotEmpty) ...[
                 _sectionHeader("Active Orders", Icons.local_shipping_rounded),
                 const SizedBox(height: 8),
-                // Active orders are can deletable
+                // Active orders  can never deletable
 
                 ...activeDocs.map(
                   (doc) => _OrderCard(
@@ -575,8 +575,7 @@ class _OrderCard extends StatelessWidget {
     );
   }
 
-  // Reason the rider selected when marking the order Undelivered
-  // (`undeliveredReason`, plus `undeliveredNote` for "Other reason").
+  
   void _showUndeliveredDialog(BuildContext context) {
     final String base = (data['undeliveredReason'] ?? '').toString().trim();
     final String note = (data['undeliveredNote'] ?? '').toString().trim();

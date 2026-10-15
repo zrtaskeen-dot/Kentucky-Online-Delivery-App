@@ -1,3 +1,5 @@
+// ignore_for_file: unused_element, unused_field, unused_local_variable
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -16,7 +18,7 @@ class CustomerOrderTrackerScreen extends StatefulWidget {
 
 class _CustomerOrderTrackerScreenState
     extends State<CustomerOrderTrackerScreen> {
-  bool _isDialogShown = false;
+  final bool _isDialogShown = false;
   StreamSubscription<DocumentSnapshot>? _orderSubscription;
 
   @override
@@ -43,7 +45,7 @@ class _CustomerOrderTrackerScreenState
 
             if (data == null) return;
 
-            // Order Status check 
+            
             final String status = (data['order_status'] ?? '')
                 .toString()
                 .trim()
@@ -51,16 +53,15 @@ class _CustomerOrderTrackerScreenState
             final bool isFeedbackSubmitted =
                 data['isFeedbackSubmitted'] ?? false;
 
-            // Current Logged-in Customer ID
             final String? currentUserId =
                 FirebaseAuth.instance.currentUser?.uid;
 
-            // 3. Customer ID from Firestore document 
+         
             final String orderCustomerId =
                 (data['customerId'] ?? data['userId'] ?? data['user_id'] ?? '')
                     .toString();
 
-            // 4. Ensures only the valid customer gets the popup
+            
             final bool isMyOrder =
                 currentUserId != null && currentUserId == orderCustomerId;
 

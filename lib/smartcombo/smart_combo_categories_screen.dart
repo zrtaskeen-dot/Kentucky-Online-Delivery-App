@@ -23,11 +23,9 @@ class SmartComboCategoriesScreen extends StatefulWidget {
 
 class _SmartComboCategoriesScreenState
     extends State<SmartComboCategoriesScreen> {
-  // 🌟 FIXED: Combo Bucket ko parent screen par le aaye taake back aane par data clear na ho
   List<Map<String, dynamic>> globalComboBucket = [];
 
-  // 👈 CHANGED: current user ki id nikali taake cart count sirf unke apne
-  // items count kare (guest fallback bhi rakha hai taake app crash na ho).
+  
   final String userId =
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
 
@@ -48,7 +46,7 @@ class _SmartComboCategoriesScreenState
         child: SafeArea(
           child: Column(
             children: [
-              // Custom Header Bar
+              
               Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Row(
@@ -77,15 +75,14 @@ class _SmartComboCategoriesScreenState
                         ),
                       ),
                     ),
-                    // 👈 CHANGED: Cart icon ab live item-count badge dikhata
-                    // hai aur tap karne par CartScreen khulti hai.
+                    
                     _buildCartIconWithBadge(context),
                   ],
                 ),
               ),
               const SizedBox(height: 10),
 
-              // Fetching standard categories
+              // Fetching  categories
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
@@ -171,7 +168,6 @@ class _SmartComboCategoriesScreenState
                                 children: [
                                   GestureDetector(
                                     onTap: () {
-                                      // 🌟 FIXED: Ab hum `globalComboBucket` ko paas kar rahe hain aur wapsi par state refresh kar rahe hain
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
@@ -180,11 +176,10 @@ class _SmartComboCategoriesScreenState
                                             chosenPrice: widget.chosenPrice,
                                             chosenCategory: catName,
                                             sharedComboBucket:
-                                                globalComboBucket, // Pass bucket reference
+                                                globalComboBucket, 
                                           ),
                                         ),
                                       ).then((_) {
-                                        // Jab user items screen se back aayega toh categories screen ka state refresh ho jaye
                                         setState(() {});
                                       });
                                     },
@@ -260,11 +255,9 @@ class _SmartComboCategoriesScreenState
     );
   }
 
-  // 👈 NEW: Live Firestore stream se cart items ka count nikal kar
-  // shopping cart icon ke upar chhota badge dikhata hai. Tap karne
-  // par seedha CartScreen khulti hai.
+  
   Widget _buildCartIconWithBadge(BuildContext context) {
-    // CartScreen wala hi filter: sirf ACTIVE branch ke items gine jayen.
+   
     final String activeBranchId = context
         .watch<CartProvider>()
         .selectedBranchId;
@@ -275,9 +268,7 @@ class _SmartComboCategoriesScreenState
           .where('userId', isEqualTo: userId)
           .snapshots(),
       builder: (context, snapshot) {
-        // Pehle sab docs gine jate the (dusri branch ke bhi), is liye
-        // cart khali hone par bhi "1" dikhta tha. Ab branchId khali ho ya
-        // active branch ke barabar ho, sirf wohi gine jate hain.
+      
         int itemCount = 0;
         if (snapshot.hasData) {
           final counted = snapshot.data!.docs.where((doc) {
@@ -286,22 +277,15 @@ class _SmartComboCategoriesScreenState
             if (!(docBranchId.isEmpty || docBranchId == activeBranchId)) {
               return false;
             }
-            // quantity 0 ya kam wale documents ko na ginein
+            
             final qty = data['quantity'];
             if (qty is num && qty <= 0) return false;
             return true;
           }).toList();
           itemCount = counted.length;
 
-          // TEMPORARY DEBUG: masla theek hone ke baad ye print hata dein.
-          debugPrint(
-            'CART BADGE | uid=$userId | activeBranch="$activeBranchId" | '
-            'allDocs=${snapshot.data!.docs.length} | counted=$itemCount | '
-            '${counted.map((d) {
-              final m = d.data() as Map<String, dynamic>;
-              return '${d.id}{name=${m['name']}, branchId=${m['branchId']}, qty=${m['quantity']}}';
-            }).toList()}',
-          );
+          
+        
         }
 
         return Stack(

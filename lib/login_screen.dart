@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -48,18 +49,24 @@ class _LoginScreenState extends State<LoginScreen> {
     'rider': 'R002',
   };
 
-  Future<String> _fetchRoleName(String roleID) async {
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('user_role')
-          .doc(roleID)
-          .get();
-      return (doc.data()?['rolename'] ?? '').toString();
-    } catch (e) {
-      debugPrint('Failed to fetch role name for $roleID: $e');
-      return '';
+  static final RegExp _emailRegex = RegExp(
+    r'^[a-zA-Z0-9]+([._%+\-][a-zA-Z0-9]+)*@(gmail|yahoo|hotmail|outlook)\.com$',
+    caseSensitive: false,
+  );
+
+  static final List<TextInputFormatter> _emailInputFormatters = [
+    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9._%+\-@]')),
+  ];
+
+  String? _validateEmail(String? value) {
+    final v = value?.trim() ?? '';
+    if (v.isEmpty) return 'Enter your email';
+    if (!_emailRegex.hasMatch(v)) {
+      return 'Use a valid Gmail, Yahoo, Hotmail or Outlook email';
     }
+    return null;
   }
+
 
   @override
   void dispose() {
@@ -342,9 +349,7 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // NEW: besides emailVerified, fill in any profile fields that are
-        // missing (accounts created before the sign-up fix only had the
-        // FCM token). Existing values are never overwritten.
+        
         final profileFix = <String, dynamic>{'emailVerified': true};
         final hasName =
             (userData['name'] ?? '').toString().isNotEmpty ||
@@ -518,9 +523,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         label: 'Email',
                         icon: Icons.email_outlined,
                         keyboardType: TextInputType.emailAddress,
-                        validator: (v) => v == null || !v.contains('@')
-                            ? 'Enter valid email'
-                            : null,
+                        inputFormatters: _emailInputFormatters,
+                        validator: _validateEmail,
                       ),
                       const SizedBox(height: 16),
                       _buildField(
@@ -731,11 +735,13 @@ class _LoginScreenState extends State<LoginScreen> {
     bool obscureText = false,
     Widget? suffixIcon,
     String? Function(String?)? validator,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
       obscureText: obscureText,
+      inputFormatters: inputFormatters,
       style: const TextStyle(
         fontSize: 15,
         fontWeight: FontWeight.w600,

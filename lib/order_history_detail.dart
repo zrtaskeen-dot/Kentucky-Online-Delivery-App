@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_types_as_parameter_names
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -97,8 +99,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   static const Color cardColor = Color(0xFFFFFDFA);
   static const Color lightMaroon = Color(0x33A70000);
 
-  // Orders in these statuses are finished: they leave Active Orders, go to
-  // Order History, and no longer show the Track Order button.
+ 
   static const List<String> _pastStatuses = [
     'delivered',
     'cancelled',
@@ -266,7 +267,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
       return "${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}  "
           "${hour12.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')} $period";
     }
-    return "—";
+    return "-";
   }
 
   Color get _statusColor {

@@ -1,3 +1,5 @@
+
+
 import 'dart:convert';
 import 'dart:ui' as ui;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,35 +9,18 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'rider_logic.dart';
 
-// Google Directions API key — NOT written in the code. It is read from
-// env.json (entry "DIRECTIONS_API_KEY") and passed in when the app is run /
-// built:
-//   flutter run --dart-define-from-file=env.json
-//   flutter build apk --dart-define-from-file=env.json
-// The "Directions API" must be enabled for this key in Google Cloud.
+
 const String _directionsApiKey = String.fromEnvironment('DIRECTIONS_API_KEY');
 
-// ═════════════════════════════════════════════════════════════════════
-// Rider's delivery map
-//
-// Shows EVERY order of this rider that is currently "On the Way":
-//   • each customer gets their own pin with the customer's NAME and the
-//     estimated travel time drawn on it
-//   • a route line (following the roads) from the rider to each customer,
-//     each customer in their own colour
-//   • a list at the bottom with every customer's name, time and distance
-//   • the rider's own live location is the blue dot (the same live GPS that
-//     every On the Way customer sees on their tracking map)
-// ═════════════════════════════════════════════════════════════════════
 
-// One colour per customer: used for the pin, the route line and the list dot.
+
 const List<Color> _kCustomerColors = [
-  Color(0xFFD32F2F), // red
-  Color(0xFF2E7D32), // green
-  Color(0xFF6A1B9A), // purple
-  Color(0xFFEF6C00), // orange
-  Color(0xFF00838F), // teal
-  Color(0xFF5D4037), // brown
+  Color(0xFFD32F2F), 
+  Color(0xFF2E7D32), 
+  Color(0xFF6A1B9A), 
+  Color(0xFFEF6C00), 
+  Color(0xFF00838F), 
+  Color(0xFF5D4037), 
 ];
 
 double? _toDouble(dynamic v) {
@@ -48,7 +33,7 @@ class _OnTheWayCustomer {
   final String orderId;
   final String name;
   final String address;
-  final LatLng? position; // null when the order has no saved coordinates
+  final LatLng? position; 
   final Color color;
   const _OnTheWayCustomer({
     required this.orderId,
@@ -61,9 +46,9 @@ class _OnTheWayCustomer {
 
 class _RouteInfo {
   final List<LatLng> points;
-  final String durationText; // e.g. "12 mins"
-  final String distanceText; // e.g. "4.2 km"
-  final LatLng fetchedFrom; // where the rider was when this route was fetched
+  final String durationText; 
+  final String distanceText; 
+  final LatLng fetchedFrom; 
   final DateTime fetchedAt;
   const _RouteInfo({
     required this.points,
@@ -92,28 +77,26 @@ class RiderDeliveriesMapScreen extends StatefulWidget {
 class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
   static const primary = Color(0xFFA70000);
 
-  // Route re-fetch limits, so the Directions API (which costs money) is not
-  // called on every GPS update: a route is refreshed only after the rider has
-  // moved this far AND at least this much time has passed.
+  
   static const double _minMetersBeforeRefetch = 50;
   static const Duration _minRefetchGap = Duration(seconds: 20);
 
   GoogleMapController? _mapController;
   BitmapDescriptor? _riderDotIcon;
 
-  // Customer pin images (pin + name + time), by label text and colour.
+  
   final Map<String, BitmapDescriptor> _pins = {};
   final Set<String> _pinsBeingBuilt = {};
 
-  // Latest road route (line + time + distance) for each order.
+ 
   final Map<String, _RouteInfo> _routes = {};
   final Set<String> _fetching = {};
   final Map<String, DateTime> _lastAttemptAt = {};
 
-  // Used for the rider's dot until the first live GPS reading arrives.
+  
   LatLng? _fallbackRiderLatLng;
 
-  // Latest values, so onMapCreated / the recenter button can fit the camera.
+  
   List<_OnTheWayCustomer> _latestCustomers = const [];
   LatLng? _latestRider;
   String _lastFitKey = '';
@@ -142,8 +125,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
     if (mounted && icon != null) setState(() => _riderDotIcon = icon);
   }
 
-  // Returns the pin image for these label lines, or null while it is still
-  // being drawn (the marker then falls back to the default red pin).
+ 
   BitmapDescriptor? _pinFor(List<String> lines, Color color) {
     final key = '${color.toARGB32()}|${lines.join('|')}';
     final cached = _pins[key];
@@ -159,8 +141,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
     return null;
   }
 
-  // Shows the rider's dot right away, before the shared live stream has
-  // produced its first reading.
+ 
   Future<void> _loadFallbackLocation() async {
     try {
       final last = await Geolocator.getLastKnownPosition();
@@ -174,7 +155,9 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
         return;
       }
       final now = await Geolocator.getCurrentPosition(
+        // ignore: deprecated_member_use
         desiredAccuracy: LocationAccuracy.high,
+        // ignore: deprecated_member_use
         timeLimit: const Duration(seconds: 8),
       );
       if (mounted && isReliableRiderFix(now, maxAccuracyMeters: 100)) {
@@ -183,12 +166,12 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
         );
       }
     } catch (_) {
-      // No permission / no fix: the map still shows the customers.
+     
     }
   }
 
   List<_OnTheWayCustomer> _parseCustomers(QuerySnapshot snap) {
-    // Sorted by order id so every customer keeps the same colour.
+    
     final docs = snap.docs.toList()..sort((a, b) => a.id.compareTo(b.id));
     final list = <_OnTheWayCustomer>[];
     for (int i = 0; i < docs.length; i++) {
@@ -200,9 +183,9 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
       list.add(
         _OnTheWayCustomer(
           orderId: d.id,
-          name: (data['customerName'] ?? data['customer_name'] ?? 'Customer')
+          name: (data['customerName'])
               .toString(),
-          address: (data['deliveryAddress'] ?? data['delivery_address'] ?? '')
+          address: (data['deliveryAddress'])
               .toString(),
           position: hasCoords ? LatLng(lat, lng) : null,
           color: _kCustomerColors[i % _kCustomerColors.length],
@@ -212,7 +195,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
     return list;
   }
 
-  // Fetches / refreshes the road route from the rider to each customer.
+ 
   void _refreshRoutes(List<_OnTheWayCustomer> customers, LatLng rider) {
     if (!mounted) return;
     final now = DateTime.now();
@@ -248,7 +231,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
         'https://maps.googleapis.com/maps/api/directions/json'
         '?origin=${rider.latitude},${rider.longitude}'
         '&destination=${dest.latitude},${dest.longitude}'
-        '&key=${_directionsApiKey}',
+        '&key=$_directionsApiKey',
       );
       final response = await http.get(uri);
       if (response.statusCode != 200) {
@@ -322,8 +305,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
     );
   }
 
-  // Bottom list: one row per On the Way order (even ones that have no map
-  // location, so it is always clear how many orders the rider has).
+ 
   Widget _buildCustomerList(List<_OnTheWayCustomer> customers) {
     return Container(
       constraints: const BoxConstraints(maxHeight: 190),
@@ -454,7 +436,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
               ? _parseCustomers(snapshot.data!)
               : <_OnTheWayCustomer>[];
 
-          // Forget routes of orders that are no longer On the Way.
+          
           _routes.removeWhere(
             (id, _) => !customers.any((c) => c.orderId == id),
           );
@@ -475,9 +457,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
                 );
               }
 
-              // Re-fit the camera whenever the SET of On the Way orders (or
-              // whether the rider's position is known) changes - not on every
-              // GPS update, so the rider can still pan/zoom freely.
+              
               final ids = customers.map((c) => c.orderId).toList()..sort();
               final fitKey = '${ids.join(',')}|${rider != null}';
               if (fitKey != _lastFitKey && _mapController != null) {
@@ -485,8 +465,8 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
                 WidgetsBinding.instance.addPostFrameCallback((_) => _fitAll());
               }
 
-              // Customers at the SAME place share one pin (otherwise one pin
-              // would hide the other); their names are stacked on it.
+              // Customers at the SAME place share one pin 
+              
               final groups = <String, List<_OnTheWayCustomer>>{};
               for (final c in customers) {
                 final p = c.position;
@@ -512,7 +492,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
                         BitmapDescriptor.defaultMarkerWithHue(
                           BitmapDescriptor.hueRed,
                         ),
-                    // Bottom-center of the pin sits exactly on the address.
+                    
                     anchor: const Offset(0.5, 1.0),
                     infoWindow: InfoWindow(
                       title: list.map((c) => c.name).join(', '),
@@ -560,7 +540,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
                 initialTarget = rider;
               }
 
-              // Keeps Google's logo / map controls above the list.
+              
               final double listPadding = customers.isEmpty
                   ? 0
                   : (customers.length * 62.0 + 20).clamp(0, 190).toDouble();
@@ -648,8 +628,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
   }
 }
 
-// Same decoding as in the single-order screen: turns the compact encoded
-// string from the Directions API into the points of the route line.
+
 List<LatLng> _decodePolylinePoints(String encoded) {
   final List<LatLng> points = [];
   int index = 0, len = encoded.length;
@@ -678,7 +657,7 @@ List<LatLng> _decodePolylinePoints(String encoded) {
   return points;
 }
 
-// Blue "you are here" dot (a Marker icon keeps the same size at any zoom).
+
 Future<BitmapDescriptor?> _buildRiderDotBitmap() async {
   try {
     const double size = 60;
@@ -699,6 +678,7 @@ Future<BitmapDescriptor?> _buildRiderDotBitmap() async {
     );
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     if (bytes == null) return null;
+    // ignore: deprecated_member_use
     return BitmapDescriptor.fromBytes(bytes.buffer.asUint8List());
   } catch (e) {
     debugPrint('Could not draw rider dot: $e');
@@ -706,9 +686,7 @@ Future<BitmapDescriptor?> _buildRiderDotBitmap() async {
   }
 }
 
-// A pin in [color] with a white label above it holding one line per customer
-// (name and travel time), drawn as one image so the text is always visible on
-// the map (a normal marker only shows its title after being tapped).
+
 Future<BitmapDescriptor?> _buildNamedPinBitmap(
   List<String> lines,
   Color color,
@@ -720,8 +698,8 @@ Future<BitmapDescriptor?> _buildNamedPinBitmap(
     final double padH = 9 * dpr;
     final double padV = 5 * dpr;
     final double gap = 2 * dpr;
-    final double pinR = 8 * dpr; // radius of the pin head
-    final double tail = 9 * dpr; // pointed bottom of the pin
+    final double pinR = 8 * dpr; 
+    final double tail = 9 * dpr; 
     final double maxTextW = 190 * dpr;
 
     final paragraph =
@@ -742,8 +720,7 @@ Future<BitmapDescriptor?> _buildNamedPinBitmap(
               ..addText(lines.join('\n')))
             .build();
     paragraph.layout(ui.ParagraphConstraints(width: maxTextW));
-    // Second pass with the real text width so the text sits centered in the
-    // label instead of in the (wider) maximum-width box.
+    
     final double textW = paragraph.longestLine.ceilToDouble() + 1;
     paragraph.layout(ui.ParagraphConstraints(width: textW));
 
@@ -756,7 +733,6 @@ Future<BitmapDescriptor?> _buildNamedPinBitmap(
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
 
-    // Label
     final bubble = RRect.fromRectAndRadius(
       Rect.fromLTWH(0, 0, w, labelH),
       Radius.circular(lines.length > 1 ? 14 * dpr : labelH / 2),
@@ -771,7 +747,7 @@ Future<BitmapDescriptor?> _buildNamedPinBitmap(
     );
     canvas.drawParagraph(paragraph, Offset(padH, padV));
 
-    // Pin (head + pointed tail); the tip is the bottom-center of the image.
+    
     final double cx = w / 2;
     final double headCy = labelH + gap + pinR;
     final pinPaint = Paint()..color = color;
@@ -793,6 +769,7 @@ Future<BitmapDescriptor?> _buildNamedPinBitmap(
     final image = await recorder.endRecording().toImage(w.ceil(), h.ceil());
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     if (bytes == null) return null;
+    // ignore: deprecated_member_use
     return BitmapDescriptor.fromBytes(bytes.buffer.asUint8List());
   } catch (e) {
     debugPrint('Could not draw customer pin: $e');
@@ -800,11 +777,7 @@ Future<BitmapDescriptor?> _buildNamedPinBitmap(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// UNDELIVERED — reasons list + confirm sheet
-// Used by this screen and by the order-details sheet on the rider home
-// screen. The chosen reason is saved on the order so the manager can see it.
-// ─────────────────────────────────────────────────────────────────────
+
 const String kUndeliveredOther = 'Other reason';
 
 const List<String> kUndeliveredReasons = [
@@ -821,9 +794,7 @@ class UndeliveredChoice {
   const UndeliveredChoice(this.reason, this.note);
 }
 
-/// Shows the reasons sheet, and when the rider confirms, marks the order
-/// Undelivered. Returns: null = rider closed the sheet, true = saved,
-/// false = saving failed.
+
 Future<bool?> showUndeliveredFlow(
   BuildContext context, {
   required RiderController rc,
@@ -848,7 +819,7 @@ class _UndeliveredSheet extends StatefulWidget {
 
 class _UndeliveredSheetState extends State<_UndeliveredSheet> {
   static const Color _maroon = Color(0xFFA70000);
-  static const Color _selectedBg = Color(0x14A70000); // maroon, ~8%
+  static const Color _selectedBg = Color(0x14A70000); 
 
   String? _selected;
   final TextEditingController _note = TextEditingController();
@@ -910,7 +881,7 @@ class _UndeliveredSheetState extends State<_UndeliveredSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      // lifts the sheet above the keyboard when the "Other" box is used
+    
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         constraints: BoxConstraints(

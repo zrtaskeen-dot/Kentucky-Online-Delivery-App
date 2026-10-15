@@ -1,6 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'rider/rider_auth_repository.dart'; // Sahi repository link ki hai
+import 'rider/rider_auth_repository.dart'; 
 
 class AuthController {
   final FirebaseAuth _auth             = FirebaseAuth.instance;
@@ -14,7 +14,7 @@ class AuthController {
     required String expectedRole,
   }) async {
     try {
-      // 1. Firebase Authentication Login
+      // Firebase Authentication Login
       final userCredential = await _auth.signInWithEmailAndPassword(
         email:    email,
         password: password,
@@ -23,14 +23,13 @@ class AuthController {
       final user = userCredential.user;
       if (user == null) return "Authentication failed.";
 
-      // 2. Email verification check
+      //  Email verification check
       await user.reload();
       if (!user.emailVerified) {
         await _auth.signOut();
         return "Please verify your email before logging in.";
       }
 
-      // 3. Firestore se user data fetch karo
       final userDoc = await _authRepository.getUserDocument(user.uid);
       if (!userDoc.exists || userDoc.data() == null) {
         await _auth.signOut();
@@ -40,7 +39,6 @@ class AuthController {
       final data   = userDoc.data() as Map<String, dynamic>;
       final String roleID = data['roleID'] ?? '';
 
-      // 4. Role check
       if (expectedRole == "customer" && roleID != "R001") {
         await _auth.signOut();
         return "Access Denied: You are not registered as a Customer.";
@@ -50,7 +48,6 @@ class AuthController {
         return "Access Denied: You are not registered as a Rider.";
       }
 
-      // ✅ 5. Agar rider login kar raha hai — missing fields auto add karo
       if (expectedRole == "rider") {
         await _ensureRiderFields(user.uid, data);
       }
@@ -66,15 +63,15 @@ class AuthController {
     }
   }
 
-  // ✅ Rider ke document mein missing fields add karo
+  
   Future<void> _ensureRiderFields(
       String uid, Map<String, dynamic> existingData) async {
     try {
       final Map<String, dynamic> updates = {};
 
-      // Sirf woh fields add karo jo missing hain
+      
       if (!existingData.containsKey('isAvailable')) {
-        updates['isAvailable'] = false;       // default: offline
+        updates['isAvailable'] = false;       
       }
       if (!existingData.containsKey('totalOrders')) {
         updates['totalOrders'] = 0;
@@ -89,16 +86,16 @@ class AuthController {
         updates['statusUpdatedAt'] = FieldValue.serverTimestamp();
       }
 
-      // Sirf tab update karo jab kuch missing ho
+     
       if (updates.isNotEmpty) {
         await _firestore
             .collection('users')
             .doc(uid)
             .update(updates);
-        print("✅ Rider fields auto-added on first login: $uid");
+        print("Rider fields auto-added on first login: $uid");
       }
     } catch (e) {
-      // Silent fail — login rok nahi raha
+   
       print("_ensureRiderFields error: $e");
     }
   }

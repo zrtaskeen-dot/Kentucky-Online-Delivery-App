@@ -1,3 +1,5 @@
+// ignore_for_file: use_build_context_synchronously
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -19,7 +21,7 @@ class _OfferSliderState extends State<OfferSlider> {
 
   static const primary = Color(0xFFA70000);
   static const accent = Color(0xFFFCF800);
-  static const creamBg = Color(0xFFFEF9E7); // matches app's cream theme
+  static const creamBg = Color(0xFFFEF9E7); 
 
   final String userId =
       FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
@@ -75,7 +77,6 @@ class _OfferSliderState extends State<OfferSlider> {
     return value > 0 ? 'Rs. $value' : '';
   }
 
-  // Resolves prices (either a Map like {"simple": 1500} or a plain number) to an int
   int _priceValue(dynamic prices) {
     if (prices is Map && prices.isNotEmpty) {
       final map = Map<String, dynamic>.from(prices);
@@ -88,21 +89,19 @@ class _OfferSliderState extends State<OfferSlider> {
     return 0;
   }
 
-  // Counts numbered points like "1. ... 2. ... 3. ..." inside the description
   int _countItems(String description) {
     if (description.isEmpty) return 0;
     final matches = RegExp(r'\d+\.').allMatches(description);
     return matches.isEmpty ? 0 : matches.length;
   }
 
-  // Splits "1. Item one 2. Item two 3. Item three" into ["Item one", "Item two", "Item three"]
   List<String> _splitItems(String description) {
     if (description.isEmpty) return [];
     final parts = description.split(RegExp(r'\d+\.\s*'));
     return parts.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
   }
 
-  // ── Bottom sheet: offer details + order ─────────────────────────
+  // Bottom sheet: offer details,order 
   void _openOfferSheet(Map<String, dynamic> offer) {
     final name = (offer['name'] ?? offer['eventName'] ?? 'Offer').toString();
     final description = (offer['description'] ?? '').toString();
@@ -159,7 +158,7 @@ class _OfferSliderState extends State<OfferSlider> {
                   );
                 }
               } catch (e) {
-                debugPrint('❌ Failed to add offer to cart: $e');
+                debugPrint(' Failed to add offer to cart: $e');
                 if (sheetContext.mounted) {
                   ScaffoldMessenger.of(sheetContext).showSnackBar(
                     SnackBar(
@@ -474,7 +473,7 @@ class _OfferSliderState extends State<OfferSlider> {
                         ),
                         child: Row(
                           children: [
-                            // LEFT SIDE: Title -> Item count -> Price
+                            
                             Expanded(
                               flex: 3,
                               child: Padding(
@@ -527,7 +526,7 @@ class _OfferSliderState extends State<OfferSlider> {
                               ),
                             ),
 
-                            // RIGHT SIDE: Image (placeholder for now)
+                           
                             Expanded(
                               flex: 2,
                               child: Padding(

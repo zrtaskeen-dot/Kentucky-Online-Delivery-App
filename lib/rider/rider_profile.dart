@@ -6,8 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
-// Capitalizes the first letter of every word as the user types (e.g.
-// "ali khan" -> "Ali Khan"), and lower-cases the rest of that word.
 class CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -43,13 +41,12 @@ class RiderProfileScreen extends StatefulWidget {
   final String riderId;
   const RiderProfileScreen({super.key, required this.riderId});
 
-  // 👈 Matches Home screen's exact brand palette (maroon + white + card tint)
-  static const Color primary = Color(0xFFA70000); // Maroon (same as Home)
+  
+  static const Color primary = Color(0xFFA70000); 
   static const Color cardBgColor = Color(
     0xFFFFFDFA,
-  ); // Card Color (same as Home)
-  static const Color bgColor = Colors.white; // Theme Background (same as Home)
-
+  ); 
+  static const Color bgColor = Colors.white; 
   @override
   State<RiderProfileScreen> createState() => _RiderProfileScreenState();
 }
@@ -59,7 +56,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
   static const cardColor = RiderProfileScreen.cardBgColor;
   static const primary = RiderProfileScreen.primary;
 
-  // Phone number mein 11 digits se zyada nahi ho sakte.
+
   static const int _maxPhoneDigits = 11;
 
   final String _cloudName = "dqjqkwwwh";
@@ -68,7 +65,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
   final ImagePicker _picker = ImagePicker();
   bool _isUploadingImage = false;
 
-  // Maroon, floating message in the app's theme (white text, rounded).
+ 
   void _showMaroonSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -91,7 +88,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
       );
   }
 
-  // -- LOGOUT METHOD --
+  // Logout function
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
@@ -100,8 +97,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
 
       _showMaroonSnack('Logged out successfully');
 
-      // Root navigator + pushNamedAndRemoveUntil('/', ...) taake bottom-nav
-      // ke nested Navigator mein na phanse aur har screen clear ho jaye.
+      
       Navigator.of(
         context,
         rootNavigator: true,
@@ -112,7 +108,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
     }
   }
 
-  // -- CLOUDINARY IMAGE PICKER + UPLOAD --
+  // Cloudinary Image Picker
   Future<void> _pickProfileImage() async {
     final XFile? picked = await _picker.pickImage(
       source: ImageSource.gallery,
@@ -171,7 +167,6 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
     }
   }
 
-  // ── Tap-to-edit dialog (customer ProfileScreen wala same dialog) ──
   void _editField(String fieldKey, String fieldLabel, String currentValue) {
     final isPhone = fieldKey == 'phone';
     final isName = fieldKey == 'name';
@@ -190,7 +185,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
       'phone': Icons.phone_outlined,
     };
 
-    // StatefulBuilder ke BAHAR, warna har rebuild par null ho jata hai.
+    
     String? fieldError;
 
     showGeneralDialog(
@@ -369,7 +364,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                                         fieldKey: newVal,
                                       }, SetOptions(merge: true));
 
-                                  // Auth ka displayName bhi sync rakho.
+                                  
                                   if (isName) {
                                     await FirebaseAuth.instance.currentUser
                                         ?.updateDisplayName(newVal);
@@ -417,7 +412,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
     );
   }
 
-  // ── Rider ki rectangular fields ──
+ 
   static const TextStyle _fieldTextStyle = TextStyle(
     fontSize: 15,
     fontWeight: FontWeight.w600,
@@ -449,7 +444,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
     );
   }
 
-  // fieldKey diya ho to tap par edit dialog khulta hai, warna field locked.
+  
   Widget _profileFieldBox({
     required IconData icon,
     required String label,
@@ -458,7 +453,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
   }) {
     final locked = fieldKey == null;
     final field = TextFormField(
-      // Value badalne par naya text foran dikhane ke liye key.
+     
       key: ValueKey('$label:$value'),
       initialValue: value,
       readOnly: true,
@@ -525,7 +520,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
               children: [
                 const SizedBox(height: 16),
 
-                // Interactive Profile Picture Avatar (customer jaisa)
+               
                 GestureDetector(
                   onTap: _isUploadingImage ? null : _pickProfileImage,
                   child: Stack(
@@ -573,7 +568,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                 ),
                 const SizedBox(height: 28),
 
-                // -- PROFILE DATA (rider ki fields) --
+                // Profile Data
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(18),
@@ -617,7 +612,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // -- LOGOUT BUTTON (customer jaisa: 220x50, radius 30) --
+                // Logout Button
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primary,

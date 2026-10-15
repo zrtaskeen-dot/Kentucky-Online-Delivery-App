@@ -16,7 +16,7 @@ class FirestoreService {
 
     required String branchId,
     String?
-    receiptImageUrl, // 👈 ADDED: Cloudinary URL of the payment receipt (Online payments only; null for COD)
+    receiptImageUrl, 
   }) async {
     try {
       List<Map<String, dynamic>> itemsList = cartItems.map((item) {
@@ -36,26 +36,12 @@ class FirestoreService {
         'orders',
       );
 
-      // A scheduled ("Deliver Later") order paid online can't have its
-      // receipt uploaded at checkout — the upload only opens 1h30m before
-      // the delivery time. GlobalFeedbackListener sends the "Payment Now
-      // Available" reminder for such orders, and it only looks at orders
-      // where paymentReminderSent is explicitly false, so this flag has to
-      // be written here at order creation.
+     
       final bool isScheduledOnline =
           deliveryTime != 'Standard Delivery' &&
           paymentMethod != 'Cash On Delivery';
 
-      // 👈 CHANGED: ab har field camelCase (no underscores) hai, taake
-      // branchId/customerId/createdAt/isFeedbackSubmitted jaisi existing
-      // fields ke naming style ke saath consistent rahe.
-      // ⚠️ IMPORTANT: agar koi doosri screen (OrderHistoryScreen, admin
-      // panel, Cloud Functions, etc.) purane snake_case field names
-      // (customer_name / phone_number / delivery_address / delivery_time /
-      // payment_method / transaction_id / order_status) se query ya read
-      // kar rahi hai, wahan bhi naam update karne honge — warna woh
-      // screens data read/query nahi kar paayengi. Yeh sirf saveOrder ka
-      // write side hai.
+     
       final docRef = await orders.add({
         'customerName': name,
         'phone': phone,
@@ -71,10 +57,9 @@ class FirestoreService {
         'branchId': branchId,
         'customerId': currentUserId,
         'isFeedbackSubmitted': false,
-        // 👈 ADDED: only written when a receipt was actually uploaded
-        // (Online payment) — COD orders simply won't have this field.
+       
         if (receiptImageUrl != null) 'receiptImageUrl': receiptImageUrl,
-        // Only scheduled online orders get the reminder flag.
+       
         if (isScheduledOnline) 'paymentReminderSent': false,
       });
 

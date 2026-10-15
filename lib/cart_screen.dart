@@ -10,13 +10,10 @@ import 'login_screen.dart';
 class CartScreen extends StatelessWidget {
   const CartScreen({super.key});
 
-  static const Color primary = Color(0xFFA70000); // Brand Maroon — matches the rest of the app's theme
+  static const Color primary = Color(0xFFA70000); 
   static const bgColor = Colors.white;
   static const Color lightMaroon = Color(0xFFFFF3F1);
   static const Color cardColor = Color(0xFFFFFDFA);
-
-  // Success/error message card colors — same palette used on the
-  // Login/Signup/Order Details screens, kept consistent app-wide.
   static const Color successBorder = Color(0xFF4A7C59);
   static const Color successBg = Color(0xFFEAF3ED);
   static const Color successText = Color(0xFF2F5B3E);
@@ -35,8 +32,7 @@ class CartScreen extends StatelessWidget {
     await CartService.setQuantity(line, currentQty + change);
   }
 
-  // Same compact, single-line, colored-card snackbar style used on the
-  // Login/Signup/Order Details screens — green for success, red for error.
+  
   void _showThemedSnack(
     BuildContext context,
     String msg, {
@@ -83,7 +79,7 @@ class CartScreen extends StatelessWidget {
     final double branchDeliveryCharge = context
         .watch<CartProvider>()
         .deliveryCharge;
-    // Active branch — cart sirf isi branch ke items dikhata hai.
+    // Show Active branch Items in cart
     final String activeBranchId = context
         .watch<CartProvider>()
         .selectedBranchId;
@@ -122,14 +118,13 @@ class CartScreen extends StatelessWidget {
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(
               child: Text(
-                "Your cart is empty 🛒",
+                "Your cart is empty ",
                 style: TextStyle(fontSize: 18, color: Colors.grey),
               ),
             );
           }
 
-          // Sirf active branch ke items. Purane docs jin mein 'branchId' nahi
-          // hai wo filter se bahar nahi hote (warna cart se ghaib ho jate).
+         
           var cartDocs = CartService.linesFromDocs(snapshot.data!.docs).where((line) {
             final docBranchId = (line.data['branchId'] ?? '').toString();
             return docBranchId.isEmpty || docBranchId == activeBranchId;
@@ -138,7 +133,7 @@ class CartScreen extends StatelessWidget {
           if (cartDocs.isEmpty) {
             return const Center(
               child: Text(
-                "Your cart is empty 🛒",
+                "Your cart is empty ",
                 style: TextStyle(fontSize: 18, color: Colors.grey),
               ),
             );

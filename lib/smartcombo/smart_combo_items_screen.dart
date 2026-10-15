@@ -1,3 +1,5 @@
+
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -21,7 +23,7 @@ class SmartComboItemsScreen extends StatefulWidget {
 }
 
 class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
-  // ── Theme Colors (Maroon — matches app) ─────────────────────────
+ 
   static const Color primary = Color(0xFFA70000);
   static const Color bgColor = Colors.white;
   static const Color lightMaroon = Color(0x33A70000);
@@ -37,8 +39,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
     _calculateDealDiscount();
   }
 
-  // 👈 CHANGED: theme-based SnackBar helper — replaces green/orange default
-  // Material colors with app's primary maroon, keeps messages emoji-free.
+  
   void _showThemedSnack(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -50,7 +51,6 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
     );
   }
 
-  // Database ke 'prices' map se correct price nikalne ka helper function
   int _getPriceFromMap(
     Map<String, dynamic>? pricesMap,
     dynamic fallbackRawPrice,
@@ -67,7 +67,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
     return int.tryParse(fallbackRawPrice.toString()) ?? 0;
   }
 
-  // Description se item aur uski original price match karne ka logic
+  
   int calculateDynamicItemPrice(
     Map<String, dynamic> menuItemData,
     String cleanMatchedText,
@@ -213,7 +213,10 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
 
   int get customComboOriginalTotal => widget.sharedComboBucket.fold(
     0,
-    (sum, item) => sum + (item['selectedPrice'] as int),
+    // ignore: avoid_types_as_parameter_names
+    (sum, item) =>
+        sum +
+        (item['selectedPrice'] as int) * ((item['quantity'] as int?) ?? 1),
   );
 
   int get customComboFinalPrice {
@@ -227,6 +230,49 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
     double discountAmount =
         projectedOriginalTotal * (dealDiscountPercentage / 100);
     return (projectedOriginalTotal - discountAmount).round();
+  }
+
+  void _addToBucket({
+    required String name,
+    required String imageUrl,
+    required int unitPrice,
+    required int quantity,
+    String? size,
+  }) {
+    setState(() {
+      final index = widget.sharedComboBucket.indexWhere(
+        (e) => e['name'] == name,
+      );
+      if (index != -1) {
+        final existing = widget.sharedComboBucket[index];
+        existing['quantity'] = ((existing['quantity'] as int?) ?? 1) + quantity;
+      } else {
+        widget.sharedComboBucket.add({
+          'name': name,
+          'imageUrl': imageUrl,
+          'selectedPrice': unitPrice,
+          'quantity': quantity,
+          if (size != null) 'size': size,
+        });
+      }
+    });
+  }
+
+  Widget _qtyButton({required IconData icon, required VoidCallback? onTap}) {
+    final enabled = onTap != null;
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: enabled ? primary : Colors.grey.shade300,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(icon, color: Colors.white, size: 18),
+      ),
+    );
   }
 
   @override
@@ -317,9 +363,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          // 👈 CHANGED: Final price bhi FittedBox mein —
-                          // full price hamesha visible rahega, ellipsis se
-                          // cut nahi hoga.
+                        
                           FittedBox(
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
@@ -382,7 +426,12 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                           );
                           try {
                             String dynamicTitle = widget.sharedComboBucket
-                                .map((item) => item['name'])
+                                .map((item) {
+                                  final q = (item['quantity'] as int?) ?? 1;
+                                  return q > 1
+                                      ? '${q}x ${item['name']}'
+                                      : item['name'];
+                                })
                                 .join(' + ');
                             dynamicTitle = dynamicTitle.length > 35
                                 ? "Custom Smart Combo Bundle"
@@ -405,12 +454,15 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                                   'addedAt': DateTime.now().toIso8601String(),
                                 });
 
+                            // ignore: use_build_context_synchronously
                             if (mounted) Navigator.pop(context);
                             setState(() => widget.sharedComboBucket.clear());
+                            // ignore: use_build_context_synchronously
                             if (mounted) Navigator.pop(context);
-                            // 👈 CHANGED: message ab English mein hai
+                            
                             _showThemedSnack("Added to cart successfully.");
                           } catch (e) {
+                            // ignore: use_build_context_synchronously
                             if (mounted) Navigator.pop(context);
                             print("Error saving item: $e");
                           }
@@ -525,7 +577,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                   : null;
               int displayedPrice = _getPriceFromMap(pricesMap, data['price']);
 
-              // ── Modern card layout (image-left, matches FoodDetailScreen style) ──
+              
               return GestureDetector(
                 onTap: () => _openItemSheet(
                   context: context,
@@ -621,18 +673,17 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                           int projectedFinalPrice =
                               calculateHypotheticalFinalPrice(displayedPrice);
                           if (projectedFinalPrice > maxBudget) {
-                            // 👈 CHANGED: emoji hataya, theme color use kiya
+                            
                             _showThemedSnack(
                               "This exceeds your selected budget.",
                             );
                           } else {
-                            setState(() {
-                              widget.sharedComboBucket.add({
-                                'name': itemName,
-                                'imageUrl': imgUrl,
-                                'selectedPrice': displayedPrice,
-                              });
-                            });
+                            _addToBucket(
+                              name: itemName,
+                              imageUrl: imgUrl,
+                              unitPrice: displayedPrice,
+                              quantity: 1,
+                            );
                           }
                         },
                         child: Container(
@@ -660,7 +711,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
     );
   }
 
-  // ── Bottom sheet, restyled to match FoodDetailScreen / PizzaDetailScreen ──
+  
   void _openItemSheet({
     required BuildContext context,
     required String itemName,
@@ -673,6 +724,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
   }) {
     String selectedSize = pricesMap.isNotEmpty ? pricesMap.keys.first : '';
     int currentPrice = displayedPrice;
+    int quantity = 1;
 
     showModalBottomSheet(
       context: context,
@@ -715,7 +767,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                       ),
                       const SizedBox(height: 18),
 
-                      // ── Image + Name (matches detail screen header style) ──
+                      // Image , Name 
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -771,6 +823,17 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                                     color: primary,
                                   ),
                                 ),
+                                if (quantity > 1) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    "Total: Rs. ${currentPrice * quantity}",
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
@@ -778,7 +841,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                       ),
                       const SizedBox(height: 18),
 
-                      // ── Description card ──
+                      // Description  
                       _sheetCard(
                         title: 'Ingredients',
                         child: Text(
@@ -792,7 +855,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                       ),
                       const SizedBox(height: 14),
 
-                      // ── Size selector (pizza only) ──
+                      // Size selector 
                       if (category == 'PIZZA' && pricesMap.isNotEmpty) ...[
                         _sheetCard(
                           title: 'Select Size',
@@ -851,7 +914,43 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                         const SizedBox(height: 18),
                       ],
 
-                      // ── Add to Combo button (bottom sticky style) ──
+                      // Quantity selector
+                      _sheetCard(
+                        title: 'Quantity',
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _qtyButton(
+                              icon: Icons.remove,
+                              onTap: quantity > 1
+                                  ? () => setPopupState(() => quantity--)
+                                  : null,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 22,
+                              ),
+                              child: Text(
+                                '$quantity',
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            ),
+                            _qtyButton(
+                              icon: Icons.add,
+                              onTap: quantity < 10
+                                  ? () => setPopupState(() => quantity++)
+                                  : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+
+                      //  Add to Combo button 
                       SizedBox(
                         width: double.infinity,
                         height: 52,
@@ -875,7 +974,9 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                           ),
                           onPressed: () {
                             int projectedFinalPrice =
-                                calculateHypotheticalFinalPrice(currentPrice);
+                                calculateHypotheticalFinalPrice(
+                                  currentPrice * quantity,
+                                );
                             if (projectedFinalPrice > maxBudget) {
                               Navigator.pop(context);
 
@@ -883,22 +984,22 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
                                 "This exceeds your selected budget.",
                               );
                             } else {
-                              setState(() {
-                                widget.sharedComboBucket.add({
-                                  'name': category == 'PIZZA'
-                                      ? "$itemName ($selectedSize)"
-                                      : itemName,
-                                  'imageUrl': imgUrl,
-                                  'selectedPrice': currentPrice,
-                                  'size': selectedSize,
-                                });
-                              });
+                              final String itemLabel = category == 'PIZZA'
+                                  ? "$itemName ($selectedSize)"
+                                  : itemName;
+                              _addToBucket(
+                                name: itemLabel,
+                                imageUrl: imgUrl,
+                                unitPrice: currentPrice,
+                                quantity: quantity,
+                                size: selectedSize,
+                              );
                               Navigator.pop(context);
-                              // 👈 CHANGED: emoji hataya, theme color use kiya
+                            
                               _showThemedSnack(
-                                category == 'PIZZA'
-                                    ? "$itemName ($selectedSize) added to your combo."
-                                    : "$itemName added to your combo.",
+                                quantity > 1
+                                    ? "$quantity x $itemLabel added to your combo."
+                                    : "$itemLabel added to your combo.",
                               );
                             }
                           },
@@ -915,7 +1016,7 @@ class _SmartComboItemsScreenState extends State<SmartComboItemsScreen> {
     );
   }
 
-  // ── Small helper: consistent card style inside bottom sheet ──
+ 
   Widget _sheetCard({required String title, required Widget child}) {
     return Container(
       width: double.infinity,

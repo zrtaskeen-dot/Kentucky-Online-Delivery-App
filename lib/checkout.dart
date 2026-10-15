@@ -14,10 +14,7 @@ import 'package:http/http.dart' as http;
 import 'cart_provider.dart';
 import 'delivery_type.dart';
 
-// NOTE: `latlong2`'s LatLng is kept only because DeliveryScreen (and other
-// downstream screens not shown here) expect `selectedLocation` in that
-// type. All actual map rendering, search, and geocoding now goes through
-// google_maps_flutter / Google's HTTP APIs — see _toGmaps/_fromGmaps below.
+
 
 class CapitalizeWordsFormatter extends TextInputFormatter {
   @override
@@ -105,29 +102,20 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   bool _fetchingCurrentLocation = false;
   bool _isInZone = true;
 
-  bool _zoneUnverified = false; // true jab Google se distance nahi mili
-  int _zoneCheckSeq = 0; // purane (stale) check ka result ignore karne ke liye
+
+  int _zoneCheckSeq = 0; 
   final Map<String, double> _roadDistCache = {};
 
-  // Radius ke upar itne extra metres allow hain (GPS jitter absorb karne ke
-  // liye). 0 = bilkul strict.
+  
   static const double _zoneToleranceM = 0;
 
-  // Delivery zone — sirf SELECTED BRANCH ka apna (restaurant_info/{branchId}).
-  // Priority:
-  //   1. deliveryBounds {south, north, west, east}  (admin ne set kiya)
-  //   2. branchLat / branchLng + deliveryRadiusKm    (circle)
-  //   3. branch ka 'address' yahin geocode karke circle
-  // Kuch bhi na mile to zone "not configured" hai aur address qabool nahi
-  // hota. Kisi aur branch ka (jaise Wah ka) zone kabhi fallback nahi banta.
-  //
-  // Circle ka radius ab ROAD (driving) distance hai, straight-line nahi.
+  
   static const double _defaultRadiusKm = 5;
   LatLng? _zoneSouthWest;
   LatLng? _zoneNorthEast;
   LatLng? _zoneCircleCenter;
   double? _zoneCircleRadiusM;
-  bool _zoneReady = false; // branch zone load karne ki koshish mukammal
+  bool _zoneReady = false; 
   bool _zoneConfigured = false;
   String _branchLabel = '';
 
@@ -136,10 +124,8 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   static const creamText = Colors.white;
   static const fieldBg = Color(0xFFFFFDFA);
 
-  // Returns true (in zone), false (outside), or null (road distance could
-  // not be verified — e.g. no internet / API error).
+  
   Future<bool?> _evaluateZone(LatLng point) async {
-    // Jab tak branch ka zone load ho raha hai, rukawat na lagao.
     if (!_zoneReady) return true;
     if (!_zoneConfigured) return false;
 
@@ -159,8 +145,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     if (c != null && r != null) {
       final limit = r + _zoneToleranceM;
 
-      // Road kabhi straight line se chhoti nahi hoti. Agar straight line
-      // hi limit se zyada hai to API call ki zaroorat nahi — seedha outside.
+     
       if (_distanceMeters(c, point) > limit) return false;
 
       final road = await _roadDistanceMeters(c, point);
@@ -170,10 +155,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return true;
   }
 
-  // Branch se customer tak driving distance (metres), Routes API
-  // (computeRouteMatrix) ke zariye — legacy Distance Matrix ab naye
-  // projects par enable nahi ho sakta.
-  // double.infinity = koi route nahi, null = verify nahi ho saka.
+ 
   Future<double?> _roadDistanceMeters(LatLng from, LatLng to) async {
     final key =
         '${from.latitude.toStringAsFixed(5)},'
@@ -203,7 +185,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
               'waypoint': {
                 'location': {
                   'latLng': {
-                    'latitude': from.latitude, // branch
+                    'latitude': from.latitude, 
                     'longitude': from.longitude,
                   },
                 },
@@ -215,7 +197,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
               'waypoint': {
                 'location': {
                   'latLng': {
-                    'latitude': to.latitude, // customer
+                    'latitude': to.latitude, 
                     'longitude': to.longitude,
                   },
                 },
@@ -276,7 +258,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return 0;
   }
 
-  // Geocoding "bounds" bias ke liye box (circle ho to uske gird ka box).
   LatLng get _biasSouthWest {
     final sw = _zoneSouthWest;
     if (sw != null) return sw;
@@ -309,7 +290,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   double? _toNum(dynamic v) =>
       v is num ? v.toDouble() : double.tryParse(v?.toString() ?? '');
 
-  // Selected branch ka delivery zone Firestore se (ya uske address se) banata hai.
   Future<void> _loadBranchZone() async {
     LatLng? sw, ne, center;
     double? radiusM;
@@ -324,7 +304,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         final data = doc.data() ?? {};
         label = (data['branchName'] ?? '').toString().trim();
 
-        // 1) Admin ka box
         final b = data['deliveryBounds'];
         if (b is Map) {
           final south = _toNum(b['south']);
@@ -342,7 +321,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           }
         }
 
-        // 2) Branch ki location + radius (circle box se zyada sahi hai)
+        //  Branch  location , radius 
         final radiusKm = _toNum(data['deliveryRadiusKm']);
         final km = (radiusKm != null && radiusKm > 0)
             ? radiusKm
@@ -352,12 +331,11 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         if (lat != null && lng != null) {
           center = LatLng(lat, lng);
           radiusM = km * 1000;
-          // Circle hi asal zone hai; admin tool ka purana saved box (jo
-          // kisi purane radius se bana tha) radius badalne par rukawat na bane.
+         
           sw = null;
           ne = null;
         } else if (sw == null) {
-          // 3) Na box, na location: branch ka address yahin geocode karo
+          
           final address = (data['address'] ?? '').toString().trim();
           if (address.isNotEmpty) {
             final uri = Uri.https(
@@ -395,8 +373,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _checkZone();
   }
 
-  // Straight-line (haversine) distance — ab sirf pre-check aur autocomplete
-  // bias ke liye use hota hai. Final zone decision road distance se hota hai.
+  
   static double _distanceMeters(LatLng a, LatLng b) {
     const earthRadius = 6371000.0;
     final dLat = (b.latitude - a.latitude) * math.pi / 180;
@@ -412,16 +389,13 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return earthRadius * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
   }
 
-  // Pin ki current position ko check karta hai. Har path (GPS, search, map
-  // tap, typed address) yahi function call karta hai.
+  
   Future<void> _checkZone() async {
     final seq = ++_zoneCheckSeq;
     final point = _pinLatLng;
     final result = await _evaluateZone(point);
-    // Agar is dauran pin dobara hila ya screen band hui, to ye result purana hai.
     if (!mounted || seq != _zoneCheckSeq) return;
     setState(() {
-      _zoneUnverified = result == null;
       _isInZone = result ?? false;
     });
   }
@@ -473,11 +447,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _sessionToken = DateTime.now().microsecondsSinceEpoch.toString();
   }
 
-  // Every Google Maps REST response is HTTP 200 even when the request was
-  // rejected — the actual outcome is in the "status" field. Both reported
-  // bugs (no suggestions, no address on tap) came from that status never
-  // being checked, so a REQUEST_DENIED/INVALID_REQUEST looked identical to
-  // "no results." This surfaces it instead of swallowing it.
+ 
   Map<String, dynamic> _decodeGoogleResponse(http.Response response) {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final status = data['status'] as String?;
@@ -493,24 +463,11 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return data;
   }
 
-  // Delivery location is no longer persisted to its own Firestore
-  // collection. It only ever gets written to Firestore once, as part of
-  // the order document itself (see FirestoreService.saveOrder). For the
-  // "remember this for next time" convenience we reuse the same
-  // SharedPreferences mechanism as the name/phone fields.
-  // Phone & address used to be remembered purely via local
-  // SharedPreferences (only when "Save info for next time" was checked).
-  // That meant editing your phone/address on the Profile screen had no
-  // effect on what showed up at checkout next time — checkout had its own
-  // separate memory. Now the user's Firestore profile (users/{uid}) is
-  // the source of truth for phone/address, and SharedPreferences is only
-  // a fallback for users who don't have those saved on their profile yet
-  // (e.g. guests, or before this change shipped).
+  
   Future<void> _loadSavedInfo() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getBool(_kSaveFlag) ?? false;
 
-    // Name is still remembered locally via the checkbox, unchanged.
     if (saved) {
       setState(() {
         _saveInfoForNextTime = true;
@@ -522,8 +479,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     final profile = await _fetchProfileDefaults();
     final profilePhone = (profile?['phone'] as String?)?.trim();
     final profileAddress = (profile?['address'] as String?)?.trim();
-    // Fields are now "latitude"/"longitude". Fall back to the old
-    // "lat"/"lng" for users who haven't placed an order since the rename.
+    
     final profileLat =
         ((profile?['latitude'] ?? profile?['lat']) as num?)?.toDouble();
     final profileLng =
@@ -553,21 +509,16 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
 
     if (address != null && address.isNotEmpty) {
-      // We have a saved address but no matching coordinates for it (can
-      // happen if it was typed into the Profile screen directly) — show
-      // the text, but still fall through to auto-detect a pin position.
+      
       _setAddressSilently(address);
     }
 
-    // No usable saved coordinates — detect the user's actual current
-    // location instead of leaving the pin at a fixed, unrelated default.
+    
     await _detectDefaultLocation();
     setState(() => _locationLoading = false);
   }
 
-  // Reads phone/address/lat/lng straight from the user's profile
-  // document. Returns null for guests or if the read fails, in which case
-  // callers fall back to SharedPreferences / auto-detected location.
+  
   Future<Map<String, dynamic>?> _fetchProfileDefaults() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return null;
@@ -583,23 +534,14 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // The phone field only ever holds the 10 raw digits after +92 (see
-  // phoneRegExp in _proceedToDeliveryScreen), but a saved profile number
-  // may be stored with "+92", a leading "0", spaces, etc. This strips
-  // everything down to digits and keeps just the last 10 — the local
-  // subscriber number — so it fits back into that field correctly.
+  
   String _localPhoneDigits(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     if (digits.length >= 10) return digits.substring(digits.length - 10);
     return digits;
   }
 
-  // Silent GPS fetch used only to pick a sensible *default* pin position
-  // when the screen first opens with no saved address. Unlike
-  // _useCurrentLocation (the map's FAB), this doesn't show our own
-  // confirmation dialog first — the OS permission prompt is already the
-  // consent step here. If location is unavailable or denied, the pin
-  // simply stays at the fallback coordinate set above.
+ 
   Future<void> _detectDefaultLocation() async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -662,9 +604,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _updatingAddressProgrammatically = false;
   }
 
-  // User typing directly into the Address field (not via search bar or
-  // map tap) should still move the map — debounced so we're not
-  // geocoding on every keystroke.
+  
   void _onAddressFieldChanged() {
     if (_updatingAddressProgrammatically) return;
     _addressDebounce?.cancel();
@@ -677,10 +617,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     });
   }
 
-  // Moves the pin/map to match what's typed in the Address field, without
-  // rewriting the field itself — the user's own wording stays as they
-  // typed it. Zone checking still happens via _checkZone() either way, so
-  // the warning banner appears if this lands outside the delivery area.
+ 
   Future<void> _geocodeTypedAddress(String query) async {
     try {
       final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
@@ -725,12 +662,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     });
   }
 
-  // Two parallel autocomplete calls: `establishment` surfaces named
-  // places (shops, restaurants, landmarks) which usually resolve to a
-  // precise pin, while `geocode` still covers plain street addresses
-  // that `establishment` alone would drop. Results are merged and
-  // de-duplicated by place_id, establishments listed first so the more
-  // precise matches show up before generic road/area results.
+ 
   Future<void> _fetchSuggestions(String query) async {
     if (_zoneReady && !_zoneConfigured) {
       _snack('Delivery area for this branch is not set yet.');
@@ -744,11 +676,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         'sessiontoken': _sessionToken,
         'location': '${_zoneCenter.latitude},${_zoneCenter.longitude}',
         'radius': _zoneRadiusMeters.toStringAsFixed(0),
-        // Without this, location+radius are only a *bias* — results
-        // outside the zone still show up. strictbounds forces Google to
-        // only return results inside that circle. (Circle straight-line
-        // hai, road distance usse kabhi chhoti nahi — isliye ye safe
-        // pre-filter hai; final decision road distance se hota hai.)
+       
         'strictbounds': 'true',
       };
 
@@ -798,11 +726,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // Google's Geocoding API often returns a Plus Code ("QWC+M73...") as the
-  // very first result for places without precise street-level data, which
-  // is what was showing up in the Address field. This picks the first
-  // result that ISN'T a plus code, falling back to the plus code only if
-  // that's genuinely all Google has for that spot.
+  
   String? _bestFormattedAddress(List results) {
     if (results.isEmpty) return null;
     for (final r in results) {
@@ -815,14 +739,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return results.first['formatted_address'] as String?;
   }
 
-  // Triggered when the user submits the search bar (presses enter/search)
-  // without tapping one of the autocomplete suggestions — a plain
-  // forward-geocode of whatever they typed.
-  //
-  // Pehle yahan apna alag zone gate tha jo pin ko move hi nahi hone deta
-  // tha, jabke GPS/map tap pin move karke sirf warning dikhate the. Ab
-  // teeno ek jaisa kaam karte hain: pin move hota hai, phir shared
-  // _checkZone() (road distance) banner dikhata hai.
+  
   Future<void> _searchAndMoveTo(String query) async {
     if (query.trim().isEmpty) return;
     setState(() => _searchingSuggestions = true);
@@ -830,9 +747,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
         'address': query,
         'key': _googleApiKey,
-        // Geocoding API can only "bias" toward this box, it can't hard
-        // restrict like autocomplete's strictbounds can — the result is
-        // checked against the zone by _checkZone() after the pin moves.
+       
         'bounds':
             '${_biasSouthWest.latitude},${_biasSouthWest.longitude}|'
             '${_biasNorthEast.latitude},${_biasNorthEast.longitude}',
@@ -865,13 +780,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // Builds the address to fill into the Address field after a suggestion
-  // is tapped. Place Details' `formatted_address` sometimes drops the
-  // place's own name (e.g. a shop/landmark name), which is what made the
-  // filled-in address look shorter/incomplete than the suggestion the
-  // user actually picked. We prepend the place `name` when it's missing
-  // from the formatted address, and fall back to the original dropdown
-  // text if Place Details still returns something shorter than that.
+ 
   Future<void> _selectSuggestion(_PlaceSuggestion suggestion) async {
     setState(() => _suggestions = []);
     FocusScope.of(context).unfocus();
@@ -884,8 +793,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           'place_id': suggestion.placeId,
           'key': _googleApiKey,
           'sessiontoken': _sessionToken,
-          // added 'name' so we can prepend the place name when
-          // formatted_address leaves it out
+          
           'fields': 'geometry,formatted_address,address_components,types,name',
         },
       );
@@ -915,8 +823,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         address = suggestion.description;
       }
 
-      // Safety net: never end up with less text than what the dropdown
-      // already showed and the user tapped on.
+      
       if (suggestion.description.length > address.length) {
         address = suggestion.description;
       }
@@ -929,14 +836,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  // Plain reverse-geocoding only returns road/area/city/postal-code-style
-  // components — it has no concept of a shop/landmark "name" (that's why
-  // GPS-detected addresses used to start with a building/plot number or
-  // plus-code-like fragment instead of a name). This does a quick Places
-  // "nearby search" at the pin to find the closest named place, the same
-  // way _selectSuggestion() already gets a name for typed/searched
-  // addresses via Place Details — so GPS-detected and searched addresses
-  // look consistent.
+ 
   Future<String?> _nearestPlaceName(LatLng point) async {
     try {
       final uri = Uri.https(
@@ -982,10 +882,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       final address = _bestFormattedAddress(results);
       if (address == null) return;
 
-      // FIX: prepend the nearest place's name (e.g. "Aslam Market")
-      // in front of the road/city/postal-code address, same as the
-      // search-suggestion flow — instead of leaving whatever
-      // number/code-like fragment Google's plain geocode put first.
+     
       final placeName = await _nearestPlaceName(point);
       final alreadyHasName =
           placeName != null &&
@@ -1019,9 +916,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _reverseGeocode(point);
   }
 
-  // "Use my current location" — always asks first, in plain language,
-  // before triggering the OS permission prompt (and again points the user
-  // to Settings if they've permanently denied it before).
+  
   Future<void> _useCurrentLocation() async {
     final wantsToShare = await showDialog<bool>(
       context: context,
@@ -1133,8 +1028,8 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       return;
     }
 
-    // Order se pehle taaza road-distance check — cache ki wajah se agar pin
-    // nahi hila to ye free hai, aur purane (stale) result par order nahi jata.
+    // Check road distance
+    
     final inZone = await _evaluateZone(_pinLatLng);
     if (!mounted) return;
     if (inZone == null) {
@@ -1167,9 +1062,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     );
   }
 
-  // Same success/error color scheme used on login_screen.dart and
-  // delivery_type.dart, so every "something went wrong" message in the
-  // app reads the same way.
+  
   static const Color _successBorder = Color(0xFF4A7C59);
   static const Color _successBg = Color(0xFFEAF3ED);
   static const Color _successText = Color(0xFF2F5B3E);
@@ -1250,10 +1143,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           ),
         ),
       ),
-      // The map is a sibling of the scroll view, not a child inside it —
-      // if it were nested inside the SingleChildScrollView below, the
-      // outer scroll would keep stealing the pan/pinch gestures meant for
-      // the map, which is why zooming wasn't working before.
+      
       body: Column(
         children: [
           _buildMap(),
@@ -1304,8 +1194,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
             },
           ),
 
-          // Search bar + its own suggestions list — completely separate
-          // from the Address field below.
+          // Search bar , its own suggestions list
           Positioned(
             top: 12,
             left: 12,
@@ -1318,7 +1207,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
             ),
           ),
 
-          // "Use my current location" button.
+          // "Use my current location" button
           Positioned(
             bottom: 12,
             right: 12,
@@ -1548,8 +1437,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       _addressCtrl,
       'Address',
       Icons.home_work_rounded,
-      // Was 4 — still felt cramped for a merged place-name + full address
-      // string, so giving it a bit more room.
+      
       maxLines: 5,
       minLines: 3,
       focusNode: _addressFocus,

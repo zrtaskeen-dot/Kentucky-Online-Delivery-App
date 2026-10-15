@@ -326,12 +326,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   DateTime? _extractOrderDate(Map<String, dynamic> d) {
     final raw =
         d['statusUpdatedAt'] ??
-        d['deliveredAt'] ??
-        d['createdAt'] ??
-        d['orderDate'] ??
-        d['timestamp'] ??
-        d['created_at'] ??
-        d['orderTime'];
+        d['createdAt'] ;
 
     DateTime? dt;
     if (raw is Timestamp) dt = raw.toDate();
@@ -1160,11 +1155,11 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     required RiderController rc,
   }) {
     final customerName =
-        data['customerName'] ?? data['customer_name'] ?? 'Unknown';
+        data['customerName'] ;
     final address =
-        data['deliveryAddress'] ?? data['delivery_address'] ?? 'No address';
+        data['deliveryAddress'] ;
     final totalBill = data['totalAmount'] ?? 0;
-    final paymentMethod = data['paymentMethod'] ?? data['payment_method'] ?? '';
+    final paymentMethod = data['paymentMethod'];
     final List items = data['items'] ?? [];
     final firstImage = items.isNotEmpty
         ? (items[0] as Map)['imageUrl'] ?? ''
@@ -1290,20 +1285,14 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
     required bool isAccepted,
     required RiderController rc,
   }) {
-    final customerName =
-        data['customerName'] ?? data['customer_name'] ?? 'Unknown';
-    final address =
-        data['deliveryAddress'] ?? data['delivery_address'] ?? 'No address';
+    final customerName = data['customerName'];
+    final address = data['deliveryAddress'];
     final totalBill = data['totalAmount'] ?? 0;
-    final paymentMethod = data['paymentMethod'] ?? data['payment_method'] ?? '';
-    final phone =
-        data['phone'] ?? data['phoneNumber'] ?? data['phone_number'] ?? '';
+    final paymentMethod = data['paymentMethod'];
+    final phone = data['phone'];
     final lat = data['latitude'];
     final lng = data['longitude'];
-    final customerId = data['customerId'] ?? data['userId'] ?? '';
 
-    // "An update is running" for THIS sheet. It lives outside the builder, so
-    // rebuilds (or dragging the sheet down and up) never reset it.
     final ValueNotifier<bool> busy = ValueNotifier<bool>(false);
 
     String failureText() =>
@@ -1320,7 +1309,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
         final ok = await rc.updateOrderStatus(orderId, target);
         if (ok) {
           if (target == 'Delivered') {
-            // Delivered: close the sheet right away.
+            // Delivered-close the sheet right away
             if (sheetContext.mounted) Navigator.pop(sheetContext);
             if (mounted) _showTopBanner(this.context, 'Order marked as $label');
           } else if (sheetContext.mounted) {
@@ -1362,14 +1351,13 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        // Always the latest order from Firestore, never a copy from the list.
         stream: FirebaseFirestore.instance
             .collection('orders')
             .doc(orderId)
             .snapshots(),
         builder: (context, snap) {
           final live = snap.data?.data();
-          // '' until the first snapshot arrives: every button stays disabled.
+
           final String status = live != null ? resolveOrderStatus(live) : '';
 
           return Container(
@@ -1471,8 +1459,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                               ),
                             ),
 
-                            // Only while the order is On the Way, i.e.
-                            // exactly when DELIVERED is active.
+                            // Only while the order is On the Way
                             if (status == 'On the Way') ...[
                               const SizedBox(height: 10),
                               SizedBox(
@@ -1539,11 +1526,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
   Widget _statusButton({
     required String label,
     required String targetStatus,
-    required String liveStatus, // latest status from Firestore ('' = loading)
+    required String liveStatus,
     required bool busy,
     required VoidCallback onPressed,
   }) {
-    // -1 = not part of the delivery flow (loading, Undelivered, Cancelled...)
     final currentIndex = _statusSequence.indexOf(liveStatus);
     final targetIndex = _statusSequence.indexOf(targetStatus);
 
@@ -1791,7 +1777,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
 void _showTopBanner(
   BuildContext context,
   String message, {
-  Color color = const Color(0xFFA70000), // app maroon
+  Color color = const Color(0xFFA70000),
 }) {
   final overlay = Overlay.of(context, rootOverlay: true);
   late final OverlayEntry entry;

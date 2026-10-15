@@ -17,136 +17,147 @@ class OnboardPage1 extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: warmBg,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(child: _buildOnboardProgressBar(0)),
-                  const SizedBox(width: 16),
-                  TextButton(
-                    onPressed: () =>
-                        _skipOnboardingTo(context, const OnboardPage3()),
-                    style: TextButton.styleFrom(
-                      foregroundColor: muted,
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: const Text(
-                      "Skip",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 36),
-
-              RichText(
-                text: const TextSpan(
-                  style: TextStyle(
-                    fontSize: 30,
-                    fontWeight: FontWeight.w800,
-                    height: 1.2,
-                    letterSpacing: -0.5,
-                  ),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: (details) {
+        if ((details.primaryVelocity ?? 0) < 0) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const OnboardPage2()),
+          );
+        }
+      },
+      child: Scaffold(
+        backgroundColor: warmBg,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    TextSpan(
-                      text: "Plan your cravings,\n",
-                      style: TextStyle(color: ink),
-                    ),
-                    TextSpan(
-                      text: "schedule for later",
-                      style: TextStyle(color: primary),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                "Pick what you're craving and choose when it arrives — "
-                "hot and fresh, right on time.",
-                style: TextStyle(fontSize: 14, height: 1.5, color: muted),
-              ),
-              const SizedBox(height: 18),
-
-              _buildOnboardChip(
-                icon: Icons.schedule_rounded,
-                text: "New: schedule meals ahead of time",
-              ),
-
-              const SizedBox(height: 8),
-              Expanded(
-                child: _buildOnboardHero(
-                  imageUrl:
-                      "https://res.cloudinary.com/dqjqkwwwh/image/upload/v1765083671/pizza1_lrqaal.png",
-                  badges: [
-                    Positioned(
-                      left: 4,
-                      top: 20,
-                      child: _buildOnboardIconBadge(
-                        icon: Icons.delivery_dining_rounded,
-                        bg: accentOrange,
-                        iconColor: Colors.white,
+                    Expanded(child: _buildOnboardProgressBar(0)),
+                    const SizedBox(width: 16),
+                    TextButton(
+                      onPressed: () =>
+                          _skipOnboardingTo(context, const OnboardPage3()),
+                      style: TextButton.styleFrom(
+                        foregroundColor: muted,
+                        padding: EdgeInsets.zero,
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                    ),
-                    Positioned(
-                      right: 4,
-                      bottom: 28,
-                      child: _buildOnboardIconBadge(
-                        icon: Icons.favorite_rounded,
-                        bg: Colors.white,
-                        iconColor: primary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const OnboardPage2()),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accentOrange,
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                  ),
-                  child: const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        "Next",
+                      child: const Text(
+                        "Skip",
                         style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
                         ),
                       ),
-                      SizedBox(width: 8),
-                      Icon(Icons.arrow_forward_rounded, size: 20),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 36),
+
+                RichText(
+                  text: const TextSpan(
+                    style: TextStyle(
+                      fontSize: 30,
+                      fontWeight: FontWeight.w800,
+                      height: 1.2,
+                      letterSpacing: -0.5,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: "Plan your cravings,\n",
+                        style: TextStyle(color: ink),
+                      ),
+                      TextSpan(
+                        text: "schedule for later",
+                        style: TextStyle(color: primary),
+                      ),
                     ],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Text(
+                  "Pick what you're craving and choose when it arrives — "
+                  "hot and fresh, right on time.",
+                  style: TextStyle(fontSize: 14, height: 1.5, color: muted),
+                ),
+                const SizedBox(height: 18),
+
+                _buildOnboardChip(
+                  icon: Icons.schedule_rounded,
+                  text: "New: schedule meals ahead of time",
+                ),
+
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _buildOnboardHero(
+                    imageUrl:
+                        "https://res.cloudinary.com/dqjqkwwwh/image/upload/v1765083671/pizza1_lrqaal.png",
+                    badges: [
+                      Positioned(
+                        left: 4,
+                        top: 20,
+                        child: _buildOnboardIconBadge(
+                          icon: Icons.delivery_dining_rounded,
+                          bg: accentOrange,
+                          iconColor: Colors.white,
+                        ),
+                      ),
+                      Positioned(
+                        right: 4,
+                        bottom: 28,
+                        child: _buildOnboardIconBadge(
+                          icon: Icons.favorite_rounded,
+                          bg: Colors.white,
+                          iconColor: primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const OnboardPage2()),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accentOrange,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                    child: const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "Next",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Icon(Icons.arrow_forward_rounded, size: 20),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

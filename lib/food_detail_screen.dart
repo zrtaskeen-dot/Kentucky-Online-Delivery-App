@@ -21,9 +21,9 @@ class FoodDetailScreen extends StatefulWidget {
 }
 
 class _FoodDetailScreenState extends State<FoodDetailScreen> {
-  // App Theme Colors (matches the rest of the app's maroon brand palette)
-  static const Color themeColor = Color(0xFFA70000); // Main Maroon Accent
-  static const Color bgColor = Colors.white; // Matches cardColor/bottom bar
+  
+  static const Color themeColor = Color(0xFFA70000); 
+  static const Color bgColor = Colors.white; 
   static const Color lightMaroon = Color(0x33A70000);
   static const Color cardColor = Color(0xFFFFFDFA);
 
@@ -40,8 +40,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   bool get isPizza => widget.item.category.toLowerCase().contains('pizza');
   bool get isWings => widget.item.category.toLowerCase().contains('wing');
 
-  // Combo / Deals items describe what is included, so their text is
-  // shown under "Description" instead of "Ingredients".
+  
   bool get isComboOrDeal {
     final c = widget.item.category.toLowerCase();
     return c.contains('combo') || c.contains('deal');
@@ -149,9 +148,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     _fetchToppings();
   }
 
-  // ── Quantity limit ───────────────────────────────────────────────
-  // Neither the "+" button nor typing can go above this (e.g. typing 600
-  // or 800 snaps back to 500).
+  //  Quantity limit 
   static const int _maxQty = 500;
 
   final TextEditingController _qtyController = TextEditingController(text: '1');
@@ -166,11 +163,9 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   }
 
   void _onQtyFocusChange() {
-    // Field se bahar jate hi typed value ko theek (normalize) kar do.
     if (!_qtyFocus.hasFocus) _commitQtyText();
   }
 
-  // Quantity ko 1.._maxQty (500) mein rakhta hai aur text field ko sync karta hai.
   void _setQuantity(int value) {
     if (!mounted) return;
     final int q = value.clamp(1, _maxQty).toInt();
@@ -184,19 +179,17 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     }
   }
 
-  // Typing ke dauran: valid number ho to total foran update hota hai.
-  // Khali ya 0 ho to last valid quantity rehti hai (field abhi edit ho raha hai).
+  
   void _onQtyTyped(String raw) {
     final int? parsed = int.tryParse(raw);
     if (parsed == null || parsed < 1) return;
     if (parsed > _maxQty) {
-      _setQuantity(_maxQty); // typed 600 / 800 ... -> 500
+      _setQuantity(_maxQty); 
       return;
     }
     setState(() => quantity = parsed);
   }
 
-  // Edit khatam: khali/0 ho to last valid quantity wapas, warna "007" -> "7".
   void _commitQtyText() {
     final int? parsed = int.tryParse(_qtyController.text);
     _setQuantity((parsed == null || parsed < 1) ? quantity : parsed);
@@ -216,10 +209,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
 
   Future<void> _fetchToppings() async {
     try {
-      // NOTE: assumes topping documents carry a `branchId` field, the
-      // same way cart entries do (see 'branchId': widget.selectedBranchId
-      // below) — adjust the field name here if your toppings collection
-      // uses a different one.
+      
       final snap = await FirebaseFirestore.instance
           .collection('toppings')
           .where('category', isEqualTo: widget.item.category)
@@ -230,13 +220,12 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
         loadingToppings = false;
       });
     } catch (e) {
-      debugPrint('❌ Failed to fetch toppings: $e');
+      debugPrint('Failed to fetch toppings: $e');
       setState(() => loadingToppings = false);
     }
   }
 
-  // Menu document ID of this item (so the cart can later look up the live
-  // menu item). Falls back to '' if the FoodItem model has no `id` field.
+  
   String _menuItemId() {
     try {
       return ((widget.item as dynamic).id ?? '').toString();
@@ -245,7 +234,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
     }
   }
 
-  // Error message in the app's maroon theme (floating, rounded, white text).
   void _showErrorSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -281,7 +269,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
   }
 
   Future<void> _addToCart() async {
-    // Keyboard band karo aur typed quantity final kar do.
     FocusScope.of(context).unfocus();
     _commitQtyText();
     setState(() => isAddingToCart = true);
@@ -293,7 +280,6 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
           .where((n) => n.isNotEmpty)
           .toList();
 
-      // All items of this customer go into ONE cart document (carts/{userId}).
       await CartService.addItem(userId, {
         'menuItemId': _menuItemId(),
         'branchId': widget.selectedBranchId,
@@ -758,7 +744,7 @@ class _FoodDetailScreenState extends State<FoodDetailScreen> {
                   horizontal: BorderSide(color: Colors.grey.shade300),
                 ),
               ),
-              // Tap karke seedha type kar sakte hain.
+              
               child: TextField(
                 controller: _qtyController,
                 focusNode: _qtyFocus,

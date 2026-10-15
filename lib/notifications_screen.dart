@@ -109,8 +109,6 @@ class NotificationScreen extends StatelessWidget {
                     final title = data['title'] ?? 'Notification';
                     final body = data['body'] ?? '';
                     final isRead = data['isRead'] ?? false;
-                    final notifUserId = data['userId'];
-                    final isBroadcast = notifUserId == 'ALL';
                     final timestampLabel = _formatPakistaniTimestamp(
                       data['timestamp'],
                     );

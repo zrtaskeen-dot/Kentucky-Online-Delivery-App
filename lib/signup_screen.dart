@@ -77,16 +77,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   final Map<String, String> roleMap = {'customer': 'R001', 'rider': 'R002'};
 
-  // Only @gmail.com addresses are accepted for sign up.
   static final RegExp _emailRegex = RegExp(
-    r'^[a-zA-Z0-9.!#$%&*+/=?^_`{|}~-]+@gmail\.com$',
+    r'^[a-zA-Z0-9]+([._%+\-][a-zA-Z0-9]+)*@(gmail|yahoo|hotmail|outlook)\.com$',
+    caseSensitive: false,
   );
+
+  static final List<TextInputFormatter> _emailInputFormatters = [
+    FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9._%+\-@]')),
+  ];
 
   String? _validateEmail(String? value) {
     final v = value?.trim() ?? '';
     if (v.isEmpty) return 'Enter your email';
     if (!_emailRegex.hasMatch(v)) {
-      return 'Only @gmail.com addresses are allowed';
+      return 'Use a valid Gmail, Yahoo, Hotmail or Outlook email';
     }
     return null;
   }
@@ -404,6 +408,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
                         label: 'Email',
                         icon: Icons.email_outlined,
                         keyboardType: TextInputType.emailAddress,
+                        inputFormatters: _emailInputFormatters,
                         validator: _validateEmail,
                       ),
                       const SizedBox(height: 16),
@@ -666,6 +671,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     Widget? suffixIcon,
     String? Function(String?)? validator,
     bool capitalizeWords = false,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextFormField(
       controller: controller,
@@ -674,7 +680,9 @@ class _SignUpScreenState extends State<SignUpScreen> {
       textCapitalization: capitalizeWords
           ? TextCapitalization.words
           : TextCapitalization.none,
-      inputFormatters: capitalizeWords ? [CapitalizeWordsFormatter()] : null,
+      inputFormatters: capitalizeWords
+          ? [CapitalizeWordsFormatter()]
+          : inputFormatters,
       style: const TextStyle(
         fontSize: 15,
         fontWeight: FontWeight.w600,
