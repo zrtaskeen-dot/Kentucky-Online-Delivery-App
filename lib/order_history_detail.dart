@@ -99,7 +99,6 @@ class OrderHistoryDetailScreen extends StatelessWidget {
   static const Color cardColor = Color(0xFFFFFDFA);
   static const Color lightMaroon = Color(0x33A70000);
 
- 
   static const List<String> _pastStatuses = [
     'delivered',
     'cancelled',
@@ -166,18 +165,17 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     return s;
   }
 
-  String get _name => (data['customerName'] ??  '—').toString();
+  String get _name => (data['customerName'] ?? '—').toString();
 
   String get _phone => (data['phone'] ?? '—').toString();
 
-  String get _address =>
-      (data['deliveryAddress']  ?? '—').toString();
+  String get _address => (data['deliveryAddress'] ?? '—').toString();
 
   String get _deliveryTime => (data['deliveryTime'] ?? '—').toString();
 
   String get _paymentMethod => (data['paymentMethod'] ?? '—').toString();
 
-  bool get _isScheduled => _deliveryTime != "As soon as possible";
+  bool get _isScheduled => _deliveryTime.contains(' at ');
   bool get _isOnlinePayment => _paymentMethod != "Cash On Delivery";
 
   String get _receiptUrl => (data['receiptImageUrl'] ?? '').toString();
@@ -369,12 +367,25 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
     if (!_canCancelOrder) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Too close to the delivery time to cancel now."),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: const Text(
+                "Too close to the delivery time to cancel now.",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              backgroundColor: themeColor,
+              behavior: SnackBarBehavior.floating,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+          );
       }
       return;
     }
@@ -387,12 +398,25 @@ class OrderHistoryDetailScreen extends StatelessWidget {
 
     if (context.mounted) {
       Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Your order has been cancelled."),
-          backgroundColor: Colors.black87,
-        ),
-      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: const Text(
+              "Your order has been cancelled.",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            backgroundColor: themeColor,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
+        );
     }
   }
 

@@ -20,17 +20,15 @@ class CartItem {
 }
 
 class CartProvider with ChangeNotifier {
-  
   final Map<String, List<CartItem>> _branchItems = {};
-  String _selectedBranchId = ''; 
-  double _deliveryCharge = 50; 
+  String _selectedBranchId = '';
+  double _deliveryCharge = 50;
   List<CartItem> get items =>
       _branchItems.putIfAbsent(_selectedBranchId, () => <CartItem>[]);
 
   String get selectedBranchId => _selectedBranchId;
 
   void setBranchId(String branchId) {
-    
     if (_selectedBranchId.isEmpty && branchId.isNotEmpty) {
       final orphans = _branchItems.remove('');
       if (orphans != null && orphans.isNotEmpty) {
@@ -46,10 +44,9 @@ class CartProvider with ChangeNotifier {
       }
     }
     _selectedBranchId = branchId;
-    notifyListeners(); 
+    notifyListeners();
   }
 
-  
   double get deliveryCharge => _deliveryCharge;
 
   void setDeliveryCharge(double charge) {
@@ -57,7 +54,6 @@ class CartProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 
   double get totalPrice {
@@ -85,19 +81,15 @@ class CartProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  
   Future<void> clearCartInFirestore(String userId) async {
     try {
       await CartService.clearBranch(userId, _selectedBranchId);
     } catch (e) {
-     
       debugPrint('Could not clear cart in Firestore: $e');
     }
     clearCart();
   }
 }
-
-
 
 class CartLine {
   final String docId;
@@ -117,18 +109,15 @@ class CartService {
   static CollectionReference<Map<String, dynamic>> get _carts =>
       FirebaseFirestore.instance.collection('carts');
 
-  
   static Future<void> addItem(String userId, Map<String, dynamic> item) async {
     final branchId = (item['branchId'] ?? '').toString();
-    
+
     final line = <String, dynamic>{
       ...item,
       'lineId': DateTime.now().microsecondsSinceEpoch.toString(),
-      'addedAt':
-          Timestamp.now(), 
+      'addedAt': Timestamp.now(),
     }..remove('branchId');
 
-    
     final mine = await _carts.where('userId', isEqualTo: userId).get();
     DocumentReference<Map<String, dynamic>>? existing;
     for (final doc in mine.docs) {
@@ -154,7 +143,6 @@ class CartService {
     }
   }
 
-  
   static List<CartLine> linesFromDocs(Iterable<QueryDocumentSnapshot> docs) {
     final lines = <CartLine>[];
     for (final doc in docs) {
@@ -184,12 +172,11 @@ class CartService {
     return lines;
   }
 
-  //  QUANTITY / REMOVE 
-  
+  //  QUANTITY / REMOVE
+
   static Future<void> setQuantity(CartLine line, int newQty) async {
     final ref = _carts.doc(line.docId);
 
-  
     if (line.lineId == null) {
       if (newQty <= 0) {
         await ref.delete();
@@ -199,31 +186,36 @@ class CartService {
       return;
     }
 
-    await FirebaseFirestore.instance.runTransaction((tx) async {
-      final snap = await tx.get(ref);
-      if (!snap.exists) return;
-      final items = _itemsOf(snap.data());
-      final i = items.indexWhere((e) => e['lineId']?.toString() == line.lineId);
-      if (i < 0) return;
-      if (newQty <= 0) {
-        items.removeAt(i);
-      } else {
-        items[i]['quantity'] = newQty;
-      }
-      if (items.isEmpty) {
-        tx.delete(ref);
-      } else {
-        tx.update(ref, {
-          'items': items,
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-    });
+    DocumentSnapshot<Map<String, dynamic>> snap;
+    try {
+      snap = await ref.get(const GetOptions(source: Source.cache));
+    } catch (_) {
+      snap = await ref.get();
+    }
+    if (!snap.exists) return;
+
+    final items = _itemsOf(snap.data());
+    final i = items.indexWhere((e) => e['lineId']?.toString() == line.lineId);
+    if (i < 0) return;
+
+    if (newQty <= 0) {
+      items.removeAt(i);
+    } else {
+      items[i]['quantity'] = newQty;
+    }
+
+    if (items.isEmpty) {
+      await ref.delete();
+    } else {
+      await ref.update({
+        'items': items,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   static Future<void> removeLine(CartLine line) => setQuantity(line, 0);
 
-  
   static Future<void> recordSales(String userId, String activeBranchId) async {
     try {
       final snap = await _carts.where('userId', isEqualTo: userId).get();
@@ -232,7 +224,7 @@ class CartService {
         final b = (line.data['branchId'] ?? '').toString();
         if (b.isNotEmpty && b != activeBranchId) continue;
         final menuItemId = (line.data['menuItemId'] ?? '').toString();
-        if (menuItemId.isEmpty) continue; 
+        if (menuItemId.isEmpty) continue;
         final qty = int.tryParse('${line.data['quantity']}') ?? 1;
         perItem[menuItemId] = (perItem[menuItemId] ?? 0) + qty;
       }
@@ -250,7 +242,6 @@ class CartService {
     }
   }
 
-  
   static Future<void> clearBranch(String userId, String activeBranchId) async {
     final snap = await _carts.where('userId', isEqualTo: userId).get();
     if (snap.docs.isEmpty) return;
@@ -280,7 +271,7 @@ class CartService {
           });
         }
       } else if (belongs(data)) {
-        batch.delete(doc.reference); 
+        batch.delete(doc.reference);
       }
     }
     await batch.commit();

@@ -7,6 +7,25 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 
+
+class StripLeadingZeroFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var text = newValue.text;
+    while (text.startsWith('0')) {
+      text = text.substring(1);
+    }
+    if (text == newValue.text) return newValue;
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -16,10 +35,9 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   static const bgColor = Colors.white;
-  static const primary = Color(0xFFA70000); 
+  static const primary = Color(0xFFA70000);
   static const cardColor = Color(0xFFFFFDFA);
 
-  
   static const String _cloudinaryUrl =
       "https://api.cloudinary.com/v1_1/dqjqkwwwh/image/upload";
   static const String _profileUploadPreset = "payment_receipts";
@@ -51,7 +69,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       final data = doc.exists ? (doc.data() ?? {}) : <String, dynamic>{};
 
-      
       try {
         final uid = user!.uid;
 
@@ -88,7 +105,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           final existingPhone = (data['phone'] ?? '').toString();
           final existingAddress = (data['address'] ?? '').toString();
 
-         
           if (existingPhone.trim().isEmpty && orderPhone.trim().isNotEmpty) {
             data['phone'] = orderPhone;
           }
@@ -100,7 +116,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       } catch (e) {
         debugPrint("Order fetch error: $e");
       }
-     
 
       setState(() {
         _userData = data;
@@ -153,35 +168,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _isUploadingImage = false;
         });
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Profile picture updated successfully"),
-              backgroundColor: primary, 
-            ),
-          );
-        }
+        _showMaroonSnack("Profile picture updated successfully");
       } else {
         throw Exception("Upload failed");
       }
     } catch (e) {
       setState(() => _isUploadingImage = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Failed to upload photo: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showMaroonSnack("Failed to upload photo: $e");
     }
   }
 
-  
   String _localPhoneDigits(String raw) {
-    final digits = raw.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 10) return digits.substring(digits.length - 10);
+    var digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('92') && digits.length > 10) {
+      digits = digits.substring(2);
+    }
+    while (digits.startsWith('0')) {
+      digits = digits.substring(1);
+    }
+    if (digits.length > 10) return digits.substring(digits.length - 10);
     return digits;
+  }
+
+  String _displayPhone(String raw) {
+    final d = _localPhoneDigits(raw);
+    return d.length == 10 ? '+92$d' : raw;
   }
 
   void _editField(String fieldKey, String fieldLabel, String currentValue) {
@@ -213,7 +224,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       },
       pageBuilder: (ctx, _, __) {
-        
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return Center(
@@ -223,7 +233,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   margin: const EdgeInsets.symmetric(horizontal: 28),
                   padding: const EdgeInsets.all(28),
                   decoration: BoxDecoration(
-                    color: bgColor, 
+                    color: bgColor,
                     borderRadius: BorderRadius.circular(28),
                     boxShadow: [
                       BoxShadow(
@@ -239,7 +249,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: const BoxDecoration(
-                          color: cardColor, 
+                          color: cardColor,
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
@@ -271,7 +281,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             : TextInputType.text,
                         maxLength: isPhone ? 10 : null,
                         inputFormatters: isPhone
-                            ? [FilteringTextInputFormatter.digitsOnly]
+                            ? [
+                                FilteringTextInputFormatter.digitsOnly,
+                                StripLeadingZeroFormatter(),
+                                LengthLimitingTextInputFormatter(10),
+                              ]
                             : null,
                         onChanged: isPhone
                             ? (_) {
@@ -291,12 +305,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             fontWeight: FontWeight.w600,
                             color: Colors.black87,
                           ),
-                          hintText: 'Enter $fieldLabel',
+                          hintText: isPhone ? '3001234567' : 'Enter $fieldLabel',
                           counterText: isPhone ? '' : null,
                           errorText: phoneError,
                           filled: true,
-                          fillColor:
-                              cardColor, 
+                          fillColor: cardColor,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none,
@@ -356,11 +369,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               onPressed: () async {
                                 final rawInput = controller.text.trim();
 
-                                // Phone must be  10 digits 
+                                // Phone must be 10 digits
                                 if (isPhone && rawInput.length != 10) {
                                   setDialogState(
-                                    () =>
-                                        phoneError = 'Enter exactly 10 digits',
+                                    () => phoneError =
+                                        'Enter exactly 10 digits after +92',
                                   );
                                   return;
                                 }
@@ -371,30 +384,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                                 Navigator.pop(ctx);
 
-                                await FirebaseFirestore.instance
-                                    .collection('users')
-                                    .doc(user!.uid)
-                                    .set({
-                                      fieldKey: newVal,
-                                    }, SetOptions(merge: true));
+                                try {
+                                  await FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(user!.uid)
+                                      .set({
+                                        fieldKey: newVal,
+                                      }, SetOptions(merge: true));
 
-                               
-                                if (fieldKey == 'name') {
-                                  await user?.updateDisplayName(newVal);
-                                  await user?.reload();
-                                }
+                                  if (fieldKey == 'name') {
+                                    await user?.updateDisplayName(newVal);
+                                    await user?.reload();
+                                  }
 
-                                setState(() => _userData[fieldKey] = newVal);
+                                  if (!mounted) return;
+                                  setState(() => _userData[fieldKey] = newVal);
 
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        "$fieldLabel updated successfully",
-                                      ),
-                                      backgroundColor: primary, 
-                                    ),
+                                  _showMaroonSnack(
+                                    '$fieldLabel updated successfully',
                                   );
+                                } catch (e) {
+                                  _showMaroonSnack('Update failed: $e');
                                 }
                               },
                               child: const Text(
@@ -420,7 +430,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
- 
+  
   void _showMaroonSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -436,8 +446,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           backgroundColor: primary,
           behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
       );
@@ -474,7 +485,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         onTap: () => _editField(fieldKey, label, value),
         child: AbsorbPointer(
           child: TextFormField(
-           
             key: ValueKey('$fieldKey:$value'),
             initialValue: value,
             readOnly: true,
@@ -563,7 +573,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final name =
         _userData['name'] ?? _userData['fullName'] ?? user?.displayName ?? '';
     final email = _userData['email'] ?? user?.email ?? '';
-    final phone = _userData['phone'] ?? user?.phoneNumber ?? '';
+    final phone = _displayPhone(
+      (_userData['phone'] ?? user?.phoneNumber ?? '').toString(),
+    );
     final address = _userData['address'] ?? '';
     final photoUrl = _userData['photoUrl'] ?? user?.photoURL;
 
@@ -572,7 +584,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       appBar: AppBar(
         backgroundColor: bgColor,
         elevation: 0,
-       
         title: const Text(
           'My Profile',
           style: TextStyle(
@@ -732,14 +743,13 @@ class _TermsAndConditionsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor, 
+      backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: bgColor,
-        surfaceTintColor: Colors.transparent, 
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: IconButton(
-          
           icon: const Icon(
             Icons.arrow_back_outlined,
             color: Colors.black,
@@ -767,7 +777,7 @@ class _TermsAndConditionsScreen extends StatelessWidget {
           '4. Scheduled orders can be cancelled up to 1 hour and 30 minutes before delivery. After that, cancellation is not allowed.\n\n'
           '5. For scheduled online payments, upload your payment receipt in the app. Payment opens 1 hour and 30 minutes before delivery. Without a receipt, your order will not be confirmed or delivered.\n\n'
           '6. Your name, phone number, and address are used only for order processing and delivery.\n\n',
-          
+
           style: TextStyle(fontSize: 14, height: 1.6, color: Colors.black87),
         ),
       ),

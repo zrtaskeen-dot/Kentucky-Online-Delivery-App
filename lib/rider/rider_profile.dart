@@ -6,6 +6,25 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+
+class StripLeadingZeroFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var text = newValue.text;
+    while (text.startsWith('0')) {
+      text = text.substring(1);
+    }
+    if (text == newValue.text) return newValue;
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+}
+
 class CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -57,7 +76,26 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
   static const primary = RiderProfileScreen.primary;
 
 
-  static const int _maxPhoneDigits = 11;
+  static const int _maxPhoneDigits = 10; // digits after the fixed +92
+  static const String _countryCode = '+92';
+
+
+  String _localPhoneDigits(String raw) {
+    var d = raw.replaceAll(RegExp(r'\D'), '');
+    if (d.startsWith('92') && d.length > _maxPhoneDigits) d = d.substring(2);
+    while (d.startsWith('0')) {
+      d = d.substring(1);
+    }
+    if (d.length > _maxPhoneDigits) {
+      d = d.substring(d.length - _maxPhoneDigits);
+    }
+    return d;
+  }
+
+  String _displayPhone(String raw) {
+    final d = _localPhoneDigits(raw);
+    return d.length == _maxPhoneDigits ? '$_countryCode$d' : raw;
+  }
 
   final String _cloudName = "dqjqkwwwh";
   final String _uploadPreset = "rider_profiles";
@@ -81,8 +119,9 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
           ),
           backgroundColor: primary,
           behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(14),
           ),
         ),
       );
@@ -139,29 +178,12 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
             .doc(widget.riderId)
             .set({'imageUrl': downloadUrl}, SetOptions(merge: true));
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Profile photo updated',
-                style: TextStyle(color: Colors.white),
-              ),
-              backgroundColor: primary,
-            ),
-          );
-        }
+        _showMaroonSnack('Profile photo updated');
       } else {
         throw Exception('Cloudinary upload failed');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to upload photo: $e'),
-            backgroundColor: Colors.black87,
-          ),
-        );
-      }
+      _showMaroonSnack('Failed to upload photo: $e');
     } finally {
       if (mounted) setState(() => _isUploadingImage = false);
     }
@@ -173,10 +195,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
 
     var initial = currentValue == 'Not set' ? '' : currentValue;
     if (isPhone) {
-      initial = initial.replaceAll(RegExp(r'\D'), '');
-      if (initial.length > _maxPhoneDigits) {
-        initial = initial.substring(initial.length - _maxPhoneDigits);
-      }
+      initial = _localPhoneDigits(initial);
     }
     final controller = TextEditingController(text: initial);
 
@@ -266,6 +285,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                         inputFormatters: isPhone
                             ? [
                                 FilteringTextInputFormatter.digitsOnly,
+                                StripLeadingZeroFormatter(),
                                 LengthLimitingTextInputFormatter(
                                   _maxPhoneDigits,
                                 ),
@@ -282,7 +302,13 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                             color: Colors.black45,
                             size: 20,
                           ),
-                          hintText: 'Enter $fieldLabel',
+                          hintText: isPhone ? '3001234567' : 'Enter $fieldLabel',
+                          prefixText: isPhone ? '$_countryCode ' : null,
+                          prefixStyle: const TextStyle(
+                            color: Colors.black87,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 16,
+                          ),
                           counterText: isPhone ? '' : null,
                           errorText: fieldError,
                           filled: true,
@@ -354,6 +380,17 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                                   return;
                                 }
 
+                                if (isPhone && newVal.length != _maxPhoneDigits) {
+                                  setDialogState(
+                                    () => fieldError =
+                                        'Enter exactly $_maxPhoneDigits digits after $_countryCode',
+                                  );
+                                  return;
+                                }
+
+                                final valueToSave =
+                                    isPhone ? '$_countryCode$newVal' : newVal;
+
                                 Navigator.pop(ctx);
 
                                 try {
@@ -361,7 +398,7 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                                       .collection('users')
                                       .doc(widget.riderId)
                                       .set({
-                                        fieldKey: newVal,
+                                        fieldKey: valueToSave,
                                       }, SetOptions(merge: true));
 
                                   
@@ -370,23 +407,11 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                                         ?.updateDisplayName(newVal);
                                   }
 
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        "$fieldLabel updated successfully",
-                                      ),
-                                      backgroundColor: primary,
-                                    ),
+                                  _showMaroonSnack(
+                                    '$fieldLabel updated successfully',
                                   );
                                 } catch (e) {
-                                  if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text("Update failed: $e"),
-                                      backgroundColor: Colors.black87,
-                                    ),
-                                  );
+                                  _showMaroonSnack('Update failed: $e');
                                 }
                               },
                               child: const Text(
@@ -594,7 +619,9 @@ class _RiderProfileScreenState extends State<RiderProfileScreen> {
                       _profileFieldBox(
                         icon: Icons.phone_outlined,
                         label: 'Phone Number',
-                        value: (userData['phone'] ?? 'Not set').toString(),
+                        value: _displayPhone(
+                          (userData['phone'] ?? 'Not set').toString(),
+                        ),
                         fieldKey: 'phone',
                       ),
                       _profileFieldBox(

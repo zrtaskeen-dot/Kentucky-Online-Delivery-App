@@ -1085,13 +1085,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildCartIcon() {
-    final Query<Map<String, dynamic>> cartQuery = FirebaseFirestore.instance
-        .collection('carts')
-        .where('userId', isEqualTo: _currentUserId);
+  Stream<QuerySnapshot>? _cartStream;
+  String? _cartStreamUserId;
+  bool _openingCart = false;
 
+  Stream<QuerySnapshot> _cartSnapshots() {
+    final uid = _currentUserId;
+    if (_cartStream == null || _cartStreamUserId != uid) {
+      _cartStreamUserId = uid;
+      _cartStream = FirebaseFirestore.instance
+          .collection('carts')
+          .where('userId', isEqualTo: uid)
+          .snapshots();
+    }
+    return _cartStream!;
+  }
+
+  Widget _buildCartIcon() {
     return StreamBuilder<QuerySnapshot>(
-      stream: cartQuery.snapshots(),
+      stream: _cartSnapshots(),
       builder: (context, snapshot) {
         int liveCount = 0;
         if (snapshot.hasData) {
@@ -1128,35 +1140,41 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: maroon,
                   size: 26,
                 ),
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CartScreen()),
-                ),
+                onPressed: () async {
+                  if (_openingCart) return;
+                  _openingCart = true;
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const CartScreen()),
+                  );
+                  _openingCart = false;
+                },
               ),
               if (liveCount > 0)
                 Positioned(
                   right: 6,
                   top: 6,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-
-                    decoration: BoxDecoration(
-                      color: maroon,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    child: Text(
-                      '$liveCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
+                  child: IgnorePointer(
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: maroon,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 1.5),
                       ),
-                      textAlign: TextAlign.center,
+                      constraints: const BoxConstraints(
+                        minWidth: 16,
+                        minHeight: 16,
+                      ),
+                      child: Text(
+                        '$liveCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ),
                 ),
@@ -1338,10 +1356,18 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Expanded(
                   flex: 5,
+                  child: Padding(
+                    
+                    padding: _categoryMatches(item.category, 'DEALS')
+                        ? const EdgeInsets.fromLTRB(10, 10, 10, 4)
+                        : EdgeInsets.zero,
+                    child: SizedBox.expand(
                   child: ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(19),
-                    ),
+                    borderRadius: _categoryMatches(item.category, 'DEALS')
+                        ? BorderRadius.circular(14)
+                        : const BorderRadius.vertical(
+                            top: Radius.circular(19),
+                          ),
                     child: item.imageUrl.isEmpty
                         ? Container(
                             color: Colors.orange.shade50,
@@ -1364,6 +1390,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ),
+                  ),
+                    ),
                   ),
                 ),
                 Expanded(

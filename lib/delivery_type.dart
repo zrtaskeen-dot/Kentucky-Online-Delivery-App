@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -667,9 +666,20 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                           tod.minute,
                         );
 
-                        if (candidate.isBefore(minAllowed)) {
+                        final DateTime nowCheck = DateTime.now();
+                        if (candidate.isBefore(nowCheck)) {
                           setSheetState(
-                            () => errorText = "Select time 1.5h+ ahead.",
+                            () => errorText =
+                                "This time has already passed. Please select a future time.",
+                          );
+                          return;
+                        }
+                        if (candidate.isBefore(
+                          nowCheck.add(const Duration(minutes: 90)),
+                        )) {
+                          setSheetState(
+                            () => errorText =
+                                "Please select a time at least 1.5 hours from now.",
                           );
                           return;
                         }
