@@ -172,8 +172,7 @@ class _LoginScreenState extends State<LoginScreen> {
     required String details,
   }) async {
     try {
-      // system_log aur activity_logs dono ka format same: camelCase,
-      // role nahi, branch sirf rider ke liye (customer ke liye branch field hi nahi).
+      
       final payload = <String, dynamic>{
         'action': action,
         'performedBy': performedBy,
@@ -183,7 +182,7 @@ class _LoginScreenState extends State<LoginScreen> {
       };
       await FirebaseFirestore.instance.collection("system_log").add(payload);
     } catch (e) {
-      // Logging failure should never block login flow.
+      
       debugPrint('System log failed: $e');
     }
   }
@@ -247,7 +246,6 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // Staff = any roleId other than customer (R001), or a legacy text role.
   bool _isStaffData(Map<String, dynamic>? data) {
     if (data == null) return false;
     final roleId = (data['roleId'] ?? '').toString().trim();
@@ -297,11 +295,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         final riderData = riderDoc.data();
-        // ✅ FIXED: Firestore mein field ka asal naam "roleId" hai (chhota d),
-        // "roleID" nahi. Pehle yeh galat naam parhne ki wajah se hamesha khaali
-        // string milta tha, aur login sirf legacy "role" text field ki wajah se
-        // chal raha tha — ID ki wajah se nahi. Ab sirf roleId (ID-based) check
-        // hota hai, jo user_role collection mein "R002" = rider maps karta hai.
+        
         final roleId = (riderData?['roleId'] ?? '').toString();
         final isRider = roleId == roleMap['rider'];
 
@@ -314,12 +308,10 @@ class _LoginScreenState extends State<LoginScreen> {
         final riderId = riderDoc.id;
         final riderName = (riderData['name'] ?? riderData['fullName'] ?? email)
             .toString();
-        // ✅ FIXED: manager panel "branchName" field save karta hai,
-        // "branch" nahi — isliye pehle yeh hamesha khaali aata tha.
+       
         final branchName = (riderData['branchName'] ?? '').toString();
 
-        // 👈 ADDED: block-check — admin ne is rider ko block kiya ho to
-        // login yahin rok dein.
+        
         final riderStatus = (riderData['status'] ?? 'active').toString();
         if (riderStatus == 'blocked') {
           await FirebaseAuth.instance.signOut();
@@ -372,7 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final userId = userDoc.id;
         final userData = userDoc.data()!;
 
-        // NEW: staff accounts must not get into the Customer app.
+        //  staff accounts must not get into the Customer app.
         final existingRoleId = (userData['roleId'] ?? '').toString();
         final legacyRole = (userData['role'] ?? '').toString().toLowerCase();
         if (existingRoleId == roleMap['rider'] || legacyRole == 'rider') {
@@ -400,9 +392,7 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // NEW: besides emailVerified, fill in any profile fields that are
-        // missing (accounts created before the sign-up fix only had the
-        // FCM token). Existing values are never overwritten.
+       
         final profileFix = <String, dynamic>{'emailVerified': true};
         final hasName =
             (userData['name'] ?? '').toString().isNotEmpty ||
@@ -425,11 +415,9 @@ class _LoginScreenState extends State<LoginScreen> {
             .doc(userId)
             .update(profileFix);
 
-        // 👈 ADDED: save this device's FCM token now that we know
-        // who's logged in.
+       
         await FcmService.syncDeviceToken(user.uid);
 
-        // 👈 ADDED: log customer login
         await _logActivity(
           action: 'Customer Login',
           performedBy: customerName,
@@ -509,7 +497,7 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
-        // NEW: staff accounts can't enter the Customer app via Google.
+       
         if (widget.role == 'customer' &&
             docSnap.exists &&
             _isStaffData(docSnap.data())) {
@@ -537,9 +525,7 @@ class _LoginScreenState extends State<LoginScreen> {
           await userDoc.set({
             'name': user.displayName ?? '',
             'email': user.email ?? '',
-            // roleId is the source of truth — look up the display
-            // name from 'user_role' (doc id == roleId) via
-            // _fetchRoleName whenever the role text itself is needed.
+            
             'roleId': roleMap['customer'],
             'createdAt': FieldValue.serverTimestamp(),
             'emailVerified': true,
@@ -548,10 +534,10 @@ class _LoginScreenState extends State<LoginScreen> {
           await userDoc.update({'emailVerified': true});
         }
 
-        // 👈 ADDED
+        
         await FcmService.syncDeviceToken(user.uid);
 
-        // 👈 ADDED: log customer login (google)
+        
         final googleName = (user.displayName ?? user.email ?? '').toString();
         await _logActivity(
           action: 'Customer Login',
