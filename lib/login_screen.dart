@@ -567,7 +567,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } catch (e) {
-      _showSnack("Google Sign-In failed: $e");
+      _showSnack("Check Internet Connection");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
