@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'smart_combo_dal.dart';
-import '../models/food_item.dart';
+import '/food_item.dart';
 
 class SmartComboController {
   final SmartComboDAL _dal = SmartComboDAL();

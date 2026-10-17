@@ -119,7 +119,7 @@ class NotificationService {
 
     
     if (reminderTime.isBefore(DateTime.now())) {
-      print('Receipt reminder skipped — scheduled time is under 1h30m away.');
+      print('Receipt reminder skipped - scheduled time is under 1h30m away.');
       return;
     }
 

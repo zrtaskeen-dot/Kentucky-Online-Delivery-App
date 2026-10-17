@@ -312,6 +312,13 @@ class OrderDetailsScreen extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
+              if (item.toppings.isNotEmpty) ...[
+                const SizedBox(height: 1),
+                Text(
+                  "+ ${item.toppings.join(', ')}",
+                  style: const TextStyle(fontSize: 11, color: Colors.black54),
+                ),
+              ],
               const SizedBox(height: 1),
               Text(
                 "Rs. ${item.price.toStringAsFixed(0)} x ${item.quantity}",

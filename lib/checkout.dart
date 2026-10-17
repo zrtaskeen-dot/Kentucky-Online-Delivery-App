@@ -14,8 +14,6 @@ import 'package:http/http.dart' as http;
 import 'cart_provider.dart';
 import 'delivery_type.dart';
 
-
-
 class CapitalizeWordsFormatter extends TextInputFormatter {
   @override
   TextEditingValue formatEditUpdate(
@@ -43,6 +41,24 @@ class CapitalizeWordsFormatter extends TextInputFormatter {
     return newValue.copyWith(
       text: buffer.toString(),
       selection: newValue.selection,
+    );
+  }
+}
+
+class _StripLeadingZeroFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    var text = newValue.text;
+    while (text.startsWith('0')) {
+      text = text.substring(1);
+    }
+    if (text == newValue.text) return newValue;
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }
@@ -102,20 +118,17 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   bool _fetchingCurrentLocation = false;
   bool _isInZone = true;
 
-
-  int _zoneCheckSeq = 0; 
+  int _zoneCheckSeq = 0;
   final Map<String, double> _roadDistCache = {};
 
-  
   static const double _zoneToleranceM = 0;
 
-  
   static const double _defaultRadiusKm = 5;
   LatLng? _zoneSouthWest;
   LatLng? _zoneNorthEast;
   LatLng? _zoneCircleCenter;
   double? _zoneCircleRadiusM;
-  bool _zoneReady = false; 
+  bool _zoneReady = false;
   bool _zoneConfigured = false;
   String _branchLabel = '';
 
@@ -124,7 +137,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
   static const creamText = Colors.white;
   static const fieldBg = Color(0xFFFFFDFA);
 
-  
   Future<bool?> _evaluateZone(LatLng point) async {
     if (!_zoneReady) return true;
     if (!_zoneConfigured) return false;
@@ -145,7 +157,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     if (c != null && r != null) {
       final limit = r + _zoneToleranceM;
 
-     
       if (_distanceMeters(c, point) > limit) return false;
 
       final road = await _roadDistanceMeters(c, point);
@@ -155,7 +166,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return true;
   }
 
- 
   Future<double?> _roadDistanceMeters(LatLng from, LatLng to) async {
     final key =
         '${from.latitude.toStringAsFixed(5)},'
@@ -185,7 +195,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
               'waypoint': {
                 'location': {
                   'latLng': {
-                    'latitude': from.latitude, 
+                    'latitude': from.latitude,
                     'longitude': from.longitude,
                   },
                 },
@@ -197,7 +207,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
               'waypoint': {
                 'location': {
                   'latLng': {
-                    'latitude': to.latitude, 
+                    'latitude': to.latitude,
                     'longitude': to.longitude,
                   },
                 },
@@ -321,7 +331,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           }
         }
 
-        //  Branch  location , radius 
+        //  Branch  location , radius
         final radiusKm = _toNum(data['deliveryRadiusKm']);
         final km = (radiusKm != null && radiusKm > 0)
             ? radiusKm
@@ -331,11 +341,10 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         if (lat != null && lng != null) {
           center = LatLng(lat, lng);
           radiusM = km * 1000;
-         
+
           sw = null;
           ne = null;
         } else if (sw == null) {
-          
           final address = (data['address'] ?? '').toString().trim();
           if (address.isNotEmpty) {
             final uri = Uri.https(
@@ -373,7 +382,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _checkZone();
   }
 
-  
   static double _distanceMeters(LatLng a, LatLng b) {
     const earthRadius = 6371000.0;
     final dLat = (b.latitude - a.latitude) * math.pi / 180;
@@ -389,7 +397,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return earthRadius * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
   }
 
-  
   Future<void> _checkZone() async {
     final seq = ++_zoneCheckSeq;
     final point = _pinLatLng;
@@ -447,7 +454,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _sessionToken = DateTime.now().microsecondsSinceEpoch.toString();
   }
 
- 
   Map<String, dynamic> _decodeGoogleResponse(http.Response response) {
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final status = data['status'] as String?;
@@ -463,7 +469,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return data;
   }
 
-  
   Future<void> _loadSavedInfo() async {
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getBool(_kSaveFlag) ?? false;
@@ -479,11 +484,11 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     final profile = await _fetchProfileDefaults();
     final profilePhone = (profile?['phone'] as String?)?.trim();
     final profileAddress = (profile?['address'] as String?)?.trim();
-    
-    final profileLat =
-        ((profile?['latitude'] ?? profile?['lat']) as num?)?.toDouble();
-    final profileLng =
-        ((profile?['longitude'] ?? profile?['lng']) as num?)?.toDouble();
+
+    final profileLat = ((profile?['latitude'] ?? profile?['lat']) as num?)
+        ?.toDouble();
+    final profileLng = ((profile?['longitude'] ?? profile?['lng']) as num?)
+        ?.toDouble();
 
     final phoneDigits = (profilePhone != null && profilePhone.isNotEmpty)
         ? _localPhoneDigits(profilePhone)
@@ -509,16 +514,13 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
 
     if (address != null && address.isNotEmpty) {
-      
       _setAddressSilently(address);
     }
 
-    
     await _detectDefaultLocation();
     setState(() => _locationLoading = false);
   }
 
-  
   Future<Map<String, dynamic>?> _fetchProfileDefaults() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return null;
@@ -534,14 +536,12 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  
   String _localPhoneDigits(String raw) {
     final digits = raw.replaceAll(RegExp(r'\D'), '');
     if (digits.length >= 10) return digits.substring(digits.length - 10);
     return digits;
   }
 
- 
   Future<void> _detectDefaultLocation() async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -604,7 +604,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _updatingAddressProgrammatically = false;
   }
 
-  
   void _onAddressFieldChanged() {
     if (_updatingAddressProgrammatically) return;
     _addressDebounce?.cancel();
@@ -617,7 +616,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     });
   }
 
- 
   Future<void> _geocodeTypedAddress(String query) async {
     try {
       final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
@@ -662,7 +660,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     });
   }
 
- 
   Future<void> _fetchSuggestions(String query) async {
     if (_zoneReady && !_zoneConfigured) {
       _snack('Delivery area for this branch is not set yet.');
@@ -676,7 +673,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         'sessiontoken': _sessionToken,
         'location': '${_zoneCenter.latitude},${_zoneCenter.longitude}',
         'radius': _zoneRadiusMeters.toStringAsFixed(0),
-       
+
         'strictbounds': 'true',
       };
 
@@ -726,7 +723,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
-  
   String? _bestFormattedAddress(List results) {
     if (results.isEmpty) return null;
     for (final r in results) {
@@ -739,7 +735,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     return results.first['formatted_address'] as String?;
   }
 
-  
   Future<void> _searchAndMoveTo(String query) async {
     if (query.trim().isEmpty) return;
     setState(() => _searchingSuggestions = true);
@@ -747,7 +742,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       final uri = Uri.https('maps.googleapis.com', '/maps/api/geocode/json', {
         'address': query,
         'key': _googleApiKey,
-       
+
         'bounds':
             '${_biasSouthWest.latitude},${_biasSouthWest.longitude}|'
             '${_biasNorthEast.latitude},${_biasNorthEast.longitude}',
@@ -780,7 +775,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
- 
   Future<void> _selectSuggestion(_PlaceSuggestion suggestion) async {
     setState(() => _suggestions = []);
     FocusScope.of(context).unfocus();
@@ -793,7 +787,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           'place_id': suggestion.placeId,
           'key': _googleApiKey,
           'sessiontoken': _sessionToken,
-          
+
           'fields': 'geometry,formatted_address,address_components,types,name',
         },
       );
@@ -823,7 +817,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
         address = suggestion.description;
       }
 
-      
       if (suggestion.description.length > address.length) {
         address = suggestion.description;
       }
@@ -836,7 +829,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
   }
 
- 
   Future<String?> _nearestPlaceName(LatLng point) async {
     try {
       final uri = Uri.https(
@@ -882,7 +874,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       final address = _bestFormattedAddress(results);
       if (address == null) return;
 
-     
       final placeName = await _nearestPlaceName(point);
       final alreadyHasName =
           placeName != null &&
@@ -916,7 +907,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     _reverseGeocode(point);
   }
 
-  
   Future<void> _useCurrentLocation() async {
     final wantsToShare = await showDialog<bool>(
       context: context,
@@ -1016,7 +1006,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       return;
     }
     if (phoneDigits.isEmpty || !phoneRegExp.hasMatch(phoneDigits)) {
-      _snack('Phone number must be exactly 10 digits (e.g. 3001234567).');
+      _snack('Enter exactly 10 digits after +92');
       return;
     }
     if (address.isEmpty) {
@@ -1029,7 +1019,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     }
 
     // Check road distance
-    
+
     final inZone = await _evaluateZone(_pinLatLng);
     if (!mounted) return;
     if (inZone == null) {
@@ -1062,7 +1052,6 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
     );
   }
 
-  
   static const Color _successBorder = Color(0xFF4A7C59);
   static const Color _successBg = Color(0xFFEAF3ED);
   static const Color _successText = Color(0xFF2F5B3E);
@@ -1143,7 +1132,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           ),
         ),
       ),
-      
+
       body: Column(
         children: [
           _buildMap(),
@@ -1396,7 +1385,11 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
           keyboardType: TextInputType.phone,
           maxLength: 10,
           prefixText: '+92 ',
-          extraFormatters: [FilteringTextInputFormatter.digitsOnly],
+          extraFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            _StripLeadingZeroFormatter(),
+            LengthLimitingTextInputFormatter(10),
+          ],
         ),
         const SizedBox(height: 8),
 
@@ -1437,7 +1430,7 @@ class _CheckoutLocationScreenState extends State<CheckoutScreen> {
       _addressCtrl,
       'Address',
       Icons.home_work_rounded,
-      
+
       maxLines: 5,
       minLines: 3,
       focusNode: _addressFocus,

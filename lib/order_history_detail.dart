@@ -74,6 +74,23 @@ double _computeOrderTotal(
   return sum;
 }
 
+List<String> _readItemToppings(Map<String, dynamic> item) {
+  final raw = item['toppings'];
+  if (raw is String) {
+    return raw
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+  if (raw is! List) return <String>[];
+  return raw
+      .map((e) => e is Map ? (e['name'] ?? '').toString() : e.toString())
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+}
+
 List<Map<String, dynamic>> _readOrderItems(Map<String, dynamic> orderData) {
   final raw = orderData['items'] ?? [];
   if (raw is! List) return [];
@@ -939,6 +956,7 @@ class OrderHistoryDetailScreen extends StatelessWidget {
     final category = (item['category'] ?? '').toString();
     final price = _readItemPrice(item);
     final quantity = _readItemQuantity(item).round();
+    final toppings = _readItemToppings(item);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1029,6 +1047,13 @@ class OrderHistoryDetailScreen extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+                if (toppings.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    "+ ${toppings.join(', ')}",
+                    style: const TextStyle(fontSize: 12, color: Colors.black54),
+                  ),
+                ],
                 if (category.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Container(

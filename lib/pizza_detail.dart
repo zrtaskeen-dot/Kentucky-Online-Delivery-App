@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'models/food_item.dart';
+import 'food_item.dart';
 import 'cart_provider.dart';
 
 class PizzaDetailScreen extends StatefulWidget {

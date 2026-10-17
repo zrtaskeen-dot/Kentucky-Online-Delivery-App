@@ -465,7 +465,7 @@ class _RiderDeliveriesMapScreenState extends State<RiderDeliveriesMapScreen> {
                 WidgetsBinding.instance.addPostFrameCallback((_) => _fitAll());
               }
 
-              // Customers at the SAME place share one pin 
+              // Customers at the same place share one pin 
               
               final groups = <String, List<_OnTheWayCustomer>>{};
               for (final c in customers) {

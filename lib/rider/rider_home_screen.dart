@@ -1459,7 +1459,7 @@ class _RiderHomeScreenState extends State<RiderHomeScreen>
                               ),
                             ),
 
-                            // Only while the order is On the Way
+                            // Only the order is On the Way
                             if (status == 'On the Way') ...[
                               const SizedBox(height: 10),
                               SizedBox(

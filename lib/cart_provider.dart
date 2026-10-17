@@ -8,6 +8,7 @@ class CartItem {
   final String imageUrl;
   final double price;
   final String category;
+  final List<String> toppings;
   int quantity;
 
   CartItem({
@@ -15,8 +16,25 @@ class CartItem {
     required this.imageUrl,
     required this.price,
     required this.category,
+    this.toppings = const <String>[],
     this.quantity = 1,
   });
+}
+
+List<String> toppingsFromData(dynamic raw) {
+  if (raw is String) {
+    return raw
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+  if (raw is! List) return <String>[];
+  return raw
+      .map((e) => e is Map ? (e['name'] ?? '').toString() : e.toString())
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
 }
 
 class CartProvider with ChangeNotifier {

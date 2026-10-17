@@ -86,6 +86,12 @@ Future<void> _hideOrderForUser({
   });
 }
 
+bool _sameToppings(List<String> a, List<String> b) {
+  final x = List<String>.from(a)..sort();
+  final y = List<String>.from(b)..sort();
+  return x.join('|') == y.join('|');
+}
+
 Future<void> _reorderItems(
   BuildContext context,
   List<Map<String, dynamic>> items, {
@@ -109,6 +115,7 @@ Future<void> _reorderItems(
     final category = (item['category'] ?? '').toString();
     final price = _readItemPrice(item);
     final quantity = _readItemQuantity(item).round();
+    final toppings = toppingsFromData(item['toppings']);
 
     CartLine? existing;
     for (final line in cartLines) {
@@ -118,7 +125,9 @@ Future<void> _reorderItems(
           branchId == null ||
           branchId.isEmpty ||
           lineBranch == branchId;
-      if ((line.data['name'] ?? '').toString() == name && sameBranch) {
+      if ((line.data['name'] ?? '').toString() == name &&
+          sameBranch &&
+          _sameToppings(toppingsFromData(line.data['toppings']), toppings)) {
         existing = line;
         break;
       }
@@ -135,6 +144,7 @@ Future<void> _reorderItems(
         'price': price,
         'category': category,
         'quantity': quantity,
+        'toppings': toppings,
 
         if (branchId != null && branchId.isNotEmpty) 'branchId': branchId,
       });
@@ -146,6 +156,7 @@ Future<void> _reorderItems(
         imageUrl: imageUrl,
         price: price,
         category: category,
+        toppings: toppings,
         quantity: quantity,
       ),
     );

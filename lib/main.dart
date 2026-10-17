@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'cart_provider.dart';
+import 'auth_controller.dart';
 import 'notification_service.dart';
-import 'splash_screen.dart';
+import 'onboarding/splash_screen.dart';
 import 'global_feedback_listener.dart';
 import 'rider/rider_logic.dart';
 import 'live_tracking.dart';
@@ -25,6 +26,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await Firebase.initializeApp();
+    AccountGuard.init();
 
    
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);

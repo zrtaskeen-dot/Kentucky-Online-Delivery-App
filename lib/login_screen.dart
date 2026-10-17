@@ -9,6 +9,7 @@ import 'rider/rider_home_screen.dart';
 import 'main_navigation.dart';
 import 'signup_screen.dart';
 import 'fcm_service.dart';
+import 'auth_controller.dart';
 
 class LoginScreen extends StatefulWidget {
   final String role;
@@ -67,6 +68,58 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showAccountNotice());
+  }
+
+  Future<void> _showAccountNotice() async {
+    final msg = await AccountGuard.consumePendingMessage();
+    if (msg == null || !mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: themeColor),
+            SizedBox(width: 8),
+            Text(
+              'Account Access',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+            ),
+          ],
+        ),
+        content: Text(
+          msg,
+          style: const TextStyle(
+            color: Colors.black87,
+            fontSize: 14,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: themeColor,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text(
+              'OK',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -312,7 +365,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (!userDoc.exists) {
           await FirebaseAuth.instance.signOut();
-          _showSnack("Account not found. Please contact admin.");
+          _showSnack(AccountGuard.messageCustomerDeleted);
           return;
         }
 
@@ -343,9 +396,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final userStatus = (userData['status'] ?? 'active').toString();
         if (userStatus == 'blocked') {
           await FirebaseAuth.instance.signOut();
-          _showSnack(
-            "Your account has been blocked by admin. Contact support.",
-          );
+          _showSnack(AccountGuard.messageCustomerBlocked);
           return;
         }
 
@@ -403,6 +454,11 @@ class _LoginScreenState extends State<LoginScreen> {
         msg = "Check internet connection.";
       }
       if (e.code == 'invalid-credential') msg = "Invalid email or password.";
+      if (e.code == 'user-disabled') {
+        msg = widget.role == 'rider'
+            ? AccountGuard.messageRiderBlocked
+            : AccountGuard.messageCustomerBlocked;
+      }
       _showSnack(msg);
     } catch (e) {
       _showSnack("An error occurred: $e");
@@ -445,6 +501,14 @@ class _LoginScreenState extends State<LoginScreen> {
             .doc(user.uid);
         final docSnap = await userDoc.get();
 
+        if (!docSnap.exists &&
+            userCredential.additionalUserInfo?.isNewUser != true) {
+          await FirebaseAuth.instance.signOut();
+          await GoogleSignIn().signOut();
+          _showSnack(AccountGuard.messageCustomerDeleted);
+          return;
+        }
+
         // NEW: staff accounts can't enter the Customer app via Google.
         if (widget.role == 'customer' &&
             docSnap.exists &&
@@ -454,6 +518,14 @@ class _LoginScreenState extends State<LoginScreen> {
           _showSnack(
             "This is a staff account. It can't be used in the Customer app.",
           );
+          return;
+        }
+
+        if (docSnap.exists &&
+            (docSnap.data()?['status'] ?? 'active').toString() == 'blocked') {
+          await FirebaseAuth.instance.signOut();
+          await GoogleSignIn().signOut();
+          _showSnack(AccountGuard.messageCustomerBlocked);
           return;
         }
 
@@ -684,7 +756,7 @@ class _LoginScreenState extends State<LoginScreen> {
             Row(
               children: [
                 InkWell(
-                  onTap: () => Navigator.pop(context),
+                  onTap: () => Navigator.maybePop(context),
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
                     padding: const EdgeInsets.all(6),

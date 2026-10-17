@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -6,13 +5,10 @@ import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../notification_service.dart';
 
-
-
 bool isReliableRiderFix(Position p, {double maxAccuracyMeters = 50}) {
   if (p.accuracy > 0 && p.accuracy > maxAccuracyMeters) return false;
   return true;
 }
-
 
 bool isFreshFix(Position p, {Duration maxAge = const Duration(seconds: 60)}) {
   final DateTime ts = p.timestamp;
@@ -28,15 +24,12 @@ class RiderController extends ChangeNotifier {
 
   StreamSubscription<Position>? _positionStreamSubscription;
 
-  
   final Set<String> _trackedOrderIds = {};
   Position? _lastPosition;
   bool _startingStream = false;
 
- 
   final ValueNotifier<Position?> riderPosition = ValueNotifier<Position?>(null);
 
- 
   Future<void> _notifyCustomerOfStatus({
     required String customerId,
     required String status,
@@ -64,8 +57,7 @@ class RiderController extends ChangeNotifier {
         body = 'Your order has been delivered. Enjoy your meal!';
         break;
       case 'Undelivered':
-        body =
-            'We could not deliver your order. Please contact the restaurant for details.';
+        body = 'We could not deliver your order.View reason in My Orders.';
         break;
       default:
         body = 'Your order status is now: $status';
@@ -88,7 +80,6 @@ class RiderController extends ChangeNotifier {
     notifyListeners();
   }
 
- 
   Stream<QuerySnapshot> getPendingOrders(String riderId) {
     return FirebaseFirestore.instance
         .collection('orders')
@@ -96,7 +87,6 @@ class RiderController extends ChangeNotifier {
         .snapshots();
   }
 
-  
   Stream<QuerySnapshot> getAcceptedOrders(String riderId) {
     return FirebaseFirestore.instance
         .collection('orders')
@@ -105,13 +95,12 @@ class RiderController extends ChangeNotifier {
         .snapshots();
   }
 
- 
   Future<void> toggleAvailability(String riderId, bool newStatus) async {
     _setLoading(true);
     try {
       await FirebaseFirestore.instance.collection('users').doc(riderId).update({
         'isAvailable': newStatus,
-       
+
         'lastSeen': FieldValue.serverTimestamp(),
       });
       debugPrint('Rider availability updated to: $newStatus');
@@ -122,7 +111,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   Future<void> sendHeartbeat(String riderId) async {
     try {
       await FirebaseFirestore.instance.collection('users').doc(riderId).update({
@@ -134,7 +122,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   static bool isRiderOnline(
     Map<String, dynamic> data, {
     Duration maxAge = const Duration(milliseconds: 2500),
@@ -145,8 +132,8 @@ class RiderController extends ChangeNotifier {
     return DateTime.now().difference(seen.toDate()) <= maxAge;
   }
 
-  // Accept Order 
-  
+  // Accept Order
+
   Future<bool> acceptOrder(
     String orderId,
     String riderId,
@@ -156,7 +143,6 @@ class RiderController extends ChangeNotifier {
     _setError('');
 
     try {
-      
       String riderName = '';
       String riderPhone = '';
       try {
@@ -170,17 +156,17 @@ class RiderController extends ChangeNotifier {
         debugPrint('Could not read rider profile for the order: $e');
       }
 
-      await FirebaseFirestore.instance.collection('orders').doc(orderId).update(
-        {
-         
-          'orderStatus': 'Accepted',
-          'order_status': FieldValue.delete(),
-          'riderId': riderId,
-          if (riderName.isNotEmpty) 'riderName': riderName,
-          if (riderPhone.isNotEmpty) 'riderPhone': riderPhone,
-          'acceptedAt': FieldValue.serverTimestamp(),
-        },
-      );
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(orderId)
+          .update({
+            'orderStatus': 'Accepted',
+            'order_status': FieldValue.delete(),
+            'riderId': riderId,
+            if (riderName.isNotEmpty) 'riderName': riderName,
+            if (riderPhone.isNotEmpty) 'riderPhone': riderPhone,
+            'acceptedAt': FieldValue.serverTimestamp(),
+          });
 
       // In-app notification to the customer, with the rider's name
       await _notifyCustomerOfStatus(
@@ -199,7 +185,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
- 
   String _statusOf(Map<String, dynamic>? data) {
     final camel = (data?['orderStatus'] ?? '').toString();
     final snake = (data?['order_status'] ?? '').toString();
@@ -228,7 +213,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   Future<bool> updateOrderStatus(String orderId, String newStatus) async {
     _setLoading(true);
     _setError('');
@@ -250,7 +234,7 @@ class RiderController extends ChangeNotifier {
                 .toString();
             final current = _statusOf(data);
 
-            if (current == newStatus) return 'same'; 
+            if (current == newStatus) return 'same';
             if (!_canMove(current, newStatus)) {
               blockedBy = current;
               return 'blocked';
@@ -280,10 +264,9 @@ class RiderController extends ChangeNotifier {
       }
       if (outcome == 'same') {
         _setLoading(false);
-        return true; 
+        return true;
       }
 
-      
       _notifyCustomerOfStatus(
         customerId: customerId,
         status: newStatus,
@@ -308,7 +291,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   Future<bool> markUndelivered(
     String orderId,
     String reason, {
@@ -324,7 +306,6 @@ class RiderController extends ChangeNotifier {
       String customerId = '';
       String blockedBy = '';
 
-      
       final String outcome = await FirebaseFirestore.instance
           .runTransaction<String>((tx) async {
             final snap = await tx.get(orderRef);
@@ -387,10 +368,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
- 
-
-  
   Future<void> launchCustomerNavigation({
     required double? lat,
     required double? lng,
@@ -423,8 +400,8 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  // Live GPS Location Tracking works for many orders 
- 
+  // Live GPS Location Tracking works for many orders
+
   Future<void> startLiveLocationTracking(String orderId) async {
     _trackedOrderIds.add(orderId);
 
@@ -443,7 +420,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   void syncOnTheWayOrders(Iterable<String> onTheWayOrderIds) {
     final wanted = onTheWayOrderIds.toSet();
     final added = wanted.difference(_trackedOrderIds);
@@ -466,7 +442,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   Future<void> _ensureLocationStream() async {
     if (_positionStreamSubscription != null || _startingStream) return;
     _startingStream = true;
@@ -491,7 +466,6 @@ class RiderController extends ChangeNotifier {
         return;
       }
 
-      
       _positionStreamSubscription =
           Geolocator.getPositionStream(
             locationSettings: _backgroundLocationSettings(),
@@ -500,7 +474,6 @@ class RiderController extends ChangeNotifier {
             _onNewPosition(position);
           }, onError: (e) => debugPrint('Location stream error: $e'));
 
-     
       try {
         Position? firstPosition;
         try {
@@ -511,7 +484,6 @@ class RiderController extends ChangeNotifier {
             timeLimit: const Duration(seconds: 10),
           );
         } catch (_) {
-          
           final last = await Geolocator.getLastKnownPosition();
           if (last != null && isFreshFix(last)) firstPosition = last;
         }
@@ -529,7 +501,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   void _onNewPosition(Position position) {
     _lastPosition = position;
     riderPosition.value = position;
@@ -538,7 +509,6 @@ class RiderController extends ChangeNotifier {
     }
   }
 
-  
   LocationSettings _backgroundLocationSettings() {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidSettings(
@@ -578,7 +548,6 @@ class RiderController extends ChangeNotifier {
         });
   }
 
-  
   void stopLiveLocationTracking() {
     _positionStreamSubscription?.cancel();
     _positionStreamSubscription = null;

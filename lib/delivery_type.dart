@@ -64,8 +64,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  
-
   File? _imageFile;
   final ImagePicker _picker = ImagePicker();
   final TextEditingController _transactionIdController =
@@ -77,7 +75,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   String _jazzCashNumber = '';
   bool _loadingPaymentNumbers = false;
 
- 
   String get _receiverPhone {
     if (_selectedProvider == 'EasyPaisa') return _easyPaisaNumber;
     if (_selectedProvider == 'JazzCash') return _jazzCashNumber;
@@ -282,7 +279,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  
   static const Color _successBorder = Color(0xFF4A7C59);
   static const Color _successBg = Color(0xFFEAF3ED);
   static const Color _successText = Color(0xFF2F5B3E);
@@ -357,7 +353,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     return weekdays[date.weekday - 1];
   }
 
-  
   (TimeOfDay, TimeOfDay) _operatingHours() {
     TimeOfDay open = const TimeOfDay(hour: 9, minute: 0);
     TimeOfDay close = const TimeOfDay(hour: 23, minute: 0);
@@ -382,14 +377,12 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     int selectedMins = selected.hour * 60 + selected.minute;
 
     if (closeMins <= openMins) {
-      
       closeMins += 24 * 60;
       if (selectedMins < openMins) selectedMins += 24 * 60;
     }
     return selectedMins >= openMins && selectedMins <= closeMins;
   }
 
-  
   Widget _buildThemedPickerSheet({
     required String title,
     String? subtitle,
@@ -540,7 +533,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     if (picked != null) {
       setState(() {
         _scheduledDate = picked;
-        
+
         _scheduledTime = null;
       });
     }
@@ -550,7 +543,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     final DateTime baseDate = _scheduledDate ?? DateTime.now();
     final DateTime minAllowed = DateTime.now().add(const Duration(minutes: 90));
     final (openTime, _) = _operatingHours();
-
 
     DateTime initial = DateTime(
       baseDate.year,
@@ -596,13 +588,13 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                         initialDateTime: dialedTime,
                         onDateTimeChanged: (dt) => setSheetState(() {
                           dialedTime = dt;
-                         
+
                           errorText = null;
                         }),
                       ),
                     ),
                   ),
-                 
+
                   if (errorText != null) ...[
                     const SizedBox(height: 10),
                     Container(
@@ -768,7 +760,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     try {
       final userId =
           FirebaseAuth.instance.currentUser?.uid ?? 'guest_user_test';
-     
+
       final activeBranchId = Provider.of<CartProvider>(
         context,
         listen: false,
@@ -863,7 +855,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
         receiptImageUrl: receiptImageUrl,
       );
 
-     
       final uid = FirebaseAuth.instance.currentUser?.uid;
       if (uid != null) {
         try {
@@ -874,10 +865,11 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             'lng': widget.selectedLocation.longitude,
           }, SetOptions(merge: true));
         } catch (e) {
-          
           debugPrint('Failed to sync phone/address to profile: $e');
         }
       }
+
+      await _attachToppingsToOrder(newOrderId);
 
       await _clearFirestoreCart();
       if (mounted) {
@@ -894,6 +886,39 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     } catch (e) {
       setState(() => _isLoading = false);
       _showThemedSnack("Order failed.");
+    }
+  }
+
+  Future<void> _attachToppingsToOrder(String orderId) async {
+    if (widget.cartItems.every((i) => i.toppings.isEmpty)) return;
+    try {
+      final ref = FirebaseFirestore.instance.collection('orders').doc(orderId);
+      final snap = await ref.get();
+      final data = snap.data();
+      if (data == null) return;
+
+      final String key = data['items'] is List
+          ? 'items'
+          : (data['cartItems'] is List ? 'cartItems' : '');
+      if (key.isEmpty) return;
+
+      final saved = (data[key] as List)
+          .map(
+            (e) =>
+                e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{},
+          )
+          .toList();
+      if (saved.length != widget.cartItems.length) return;
+
+      for (var i = 0; i < saved.length; i++) {
+        final item = widget.cartItems[i];
+        if (item.toppings.isEmpty) continue;
+        if ((saved[i]['name'] ?? '').toString() != item.name) continue;
+        saved[i]['toppings'] = item.toppings;
+      }
+      await ref.update({key: saved});
+    } catch (e) {
+      debugPrint('Failed to attach toppings to order: $e');
     }
   }
 
@@ -1289,7 +1314,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
             ],
           ),
         ),
-       
+
         if (!isLaterMode &&
             _paymentMode == 'Online' &&
             _selectedProvider != null) ...[
@@ -1302,7 +1327,6 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
     );
   }
 
-  
   Widget _onlinePaymentTile({required bool isLaterMode}) {
     final bool isSelected = _paymentMode == 'Online';
     return InkWell(
@@ -1679,7 +1703,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
           ],
         ),
         const SizedBox(height: 10),
-       
+
         _imageFile != null
             ? _buildReceiptPreview()
             : GestureDetector(
@@ -1884,7 +1908,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
   Widget _buildSummaryBar(int totalItemCount) {
     final double itemsTotal = _itemsSubtotal;
     final double deliveryCharge = _deliveryChargeForDisplay;
-    
+
     final double grandTotal = widget.totalAmount;
 
     return Container(
@@ -2083,7 +2107,7 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                         ],
                         _reviewSectionLabel("Items"),
                         const SizedBox(height: 6),
-                       
+
                         ...widget.cartItems.map(
                           (item) => Padding(
                             padding: const EdgeInsets.symmetric(vertical: 3),
@@ -2091,12 +2115,26 @@ class _DeliveryScreenState extends State<DeliveryScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Expanded(
-                                  child: Text(
-                                    item.name,
-                                    style: const TextStyle(
-                                      fontSize: 13.5,
-                                      color: Colors.black87,
-                                    ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        item.name,
+                                        style: const TextStyle(
+                                          fontSize: 13.5,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                                      if (item.toppings.isNotEmpty)
+                                        Text(
+                                          "+ ${item.toppings.join(', ')}",
+                                          style: const TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.black54,
+                                          ),
+                                        ),
+                                    ],
                                   ),
                                 ),
                                 Text(

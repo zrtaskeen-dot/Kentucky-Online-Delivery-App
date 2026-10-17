@@ -8,8 +8,8 @@ import 'cart_provider.dart';
 import 'cart_screen.dart';
 import 'food_detail_screen.dart';
 import 'pizza_detail.dart';
-import 'models/food_item.dart';
-import '/widgets/offer_slider.dart';
+import 'food_item.dart';
+import 'offer_slider.dart';
 import 'package:animation/smartcombo/smart_combo_price_screen.dart';
 import 'order_tracker.dart';
 

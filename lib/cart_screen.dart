@@ -153,6 +153,7 @@ class CartScreen extends StatelessWidget {
                 imageUrl: data['imageUrl'] ?? '',
                 price: price,
                 category: data['category'] ?? 'FastFood',
+                toppings: toppingsFromData(data['toppings']),
                 quantity: qty,
               ),
             );
@@ -202,6 +203,7 @@ class CartScreen extends StatelessWidget {
                       itemQty: itemQty,
                       imgUrl: imgUrl,
                       category: category,
+                      toppings: toppingsFromData(item['toppings']),
                     );
                   },
                 ),
@@ -408,6 +410,7 @@ class CartScreen extends StatelessWidget {
     required int itemQty,
     required String imgUrl,
     required String category,
+    List<String> toppings = const <String>[],
   }) {
     int totalLinePrice = itemPrice * itemQty;
 
@@ -475,6 +478,15 @@ class CartScreen extends StatelessWidget {
                   category,
                   style: const TextStyle(color: Colors.grey, fontSize: 12),
                 ),
+                if (toppings.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    "+ ${toppings.join(', ')}",
+                    style: const TextStyle(color: Colors.black54, fontSize: 12),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Row(
                   children: [
